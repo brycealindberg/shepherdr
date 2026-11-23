@@ -245,10 +245,10 @@ test("liveAgent names the model the terminal runs, from its CLI's arguments, els
 });
 
 // Quotio: its local proxy's models (CLIProxyAPI on 127.0.0.1:8317) are Claude Code rows, started through the proxy
-const quotioOut = `model\topus\nquotio\t{"object":"list","data":[{"id":"gemini-3.8-flash-high","object":"model","owned_by":"antigravity"},{"id":"gpt-oss-120b-medium","object":"model"}]}\n`;
+const quotioOut = `model\topus\nquotio\t{"object":"list","data":[{"id":"claude-sonnet-5-5","object":"model","owned_by":"anthropic"},{"id":"gpt-oss-120b-medium","object":"model"}]}\n`;
 test("Quotio's models show in the Claude Code menu, none when its proxy is down", () => {
   const ids = menuFor("claude", parseDefaults("claude", quotioOut)).models.map((m) => m.id);
-  expect(ids).toContain("quotio:gemini-3.8-flash-high");
+  expect(ids).toContain("quotio:claude-sonnet-5-5");
   expect(ids).toContain("quotio:gpt-oss-120b-medium");
   expect(ids).toContain("opus");
   expect(menuFor("claude", parseDefaults("claude", "model\topus\nquotio\t\n")).models.some((m) => m.id.startsWith("quotio:"))).toBe(false);
@@ -281,6 +281,13 @@ test("a Quotio agent's context percent uses its model's window", () => {
   expect(c.window).toBe(128000);
   expect(contextWords(c)).toBe("50% context");
   expect(current("claude", quotioArgv("gemini-3.8-flash-high"), {}, {}).window).toBe(1000000);
+});
+
+test("Quotio's Antigravity models stay out of the menu: Antigravity answers Claude Code's system prompt with a 429", () => {
+  const out = `model\topus\nquotio\t{"data":[{"id":"gemini-3.8-flash-high","owned_by":"antigravity"},{"id":"claude-opus-5-5","owned_by":"anthropic"}]}\n`;
+  const ids = menuFor("claude", parseDefaults("claude", out)).models.map((m) => m.id);
+  expect(ids).toContain("quotio:claude-opus-5-5");
+  expect(ids).not.toContain("quotio:gemini-3.8-flash-high");
 });
 
 test("Quotio's image models are not chat models and stay out of the menu", () => {

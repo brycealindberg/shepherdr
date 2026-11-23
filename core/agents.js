@@ -113,7 +113,8 @@ export function parseDefaults(kind, stdout) {
     } catch {}
   }
   let quotio = [];
-  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).map((m) => m.id).filter((id) => id && !/image/.test(id)); } catch {}
+  // WARNING: Antigravity answers Claude Code's own system prompt with a 429 "Resource has been exhausted", so its models can't run here.
+  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).filter((m) => m.owned_by !== "antigravity").map((m) => m.id).filter((id) => id && !/image/.test(id)); } catch {}
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null, quotio }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
