@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import * as AGall from "./agents.js";
-import { argvFor, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
+import { argvFor, contextWords, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -264,6 +264,30 @@ test("a Quotio pick starts Claude Code on that model through the proxy, its key 
   expect(s.env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("gemini-3.8-flash-high");
   expect(s.apiKeyHelper).toContain("cliproxyapi.conf");
   expect(s.fastMode).toBe(false);
+});
+
+const quotioArgv = (id) => argvFor({ agent: "claude", model: `quotio:${id}` }, { agent: "claude", argv: ["claude"] }).argv;
+const compactAt = (argv) => JSON.parse(argv[argv.indexOf("--settings") + 1]).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+
+test("a Quotio model compacts for its own window, not the 1M the global settings set", () => {
+  expect(compactAt(quotioArgv("gpt-oss-120b-medium"))).toBe("100000");
+  expect(compactAt(quotioArgv("gemini-3.8-flash-high"))).toBe("1000000");
+  expect(compactAt(quotioArgv("claude-sonnet-4-5"))).toBe("200000");
+  expect(compactAt(quotioArgv("some-new-model"))).toBe("200000");
+});
+
+test("a Quotio agent's context percent uses its model's window", () => {
+  const c = current("claude", quotioArgv("gpt-oss-120b-medium"), { used: 64000 }, {});
+  expect(c.window).toBe(128000);
+  expect(contextWords(c)).toBe("50% context");
+  expect(current("claude", quotioArgv("gemini-3.8-flash-high"), {}, {}).window).toBe(1000000);
+});
+
+test("Quotio's image models are not chat models and stay out of the menu", () => {
+  const out = `model\topus\nquotio\t{"data":[{"id":"gemini-3.1-flash-image"},{"id":"gpt-oss-120b-medium"}]}\n`;
+  const ids = menuFor("claude", parseDefaults("claude", out)).models.map((m) => m.id);
+  expect(ids).toContain("quotio:gpt-oss-120b-medium");
+  expect(ids).not.toContain("quotio:gemini-3.1-flash-image");
 });
 
 test("a Quotio agent shows its row, and a restart back to Opus leaves the proxy", () => {

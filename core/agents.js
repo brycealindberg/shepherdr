@@ -17,7 +17,11 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 // WARNING: Quotio's key is read by apiKeyHelper where the agent runs, never put in argv (ps and task records show argv).
 const QUOTIO_URL = "http://127.0.0.1:8317";
 const QUOTIO_KEY = `awk '/^api-keys:/{f=1;next} f&&/^ *- /{gsub(/^ *- *"?|"? *$/,"");print;exit}' /opt/homebrew/etc/cliproxyapi.conf`;
+// WARNING: CLAUDE_CODE_AUTO_COMPACT_WINDOW takes 100000..1000000 only, and must be said per model (the global 1M never compacts a smaller one).
+const QUOTIO_WINDOWS = [["gpt-oss", 128000, 100000], ["gemini", 1000000, 1000000], ["claude", 200000, 200000]];
+const quotioWindow = (m) => QUOTIO_WINDOWS.find(([p]) => m.startsWith(p)) ?? [m, 200000, 200000];
 const quotioSettings = (m) => ({ fastMode: false, apiKeyHelper: QUOTIO_KEY, env: { ANTHROPIC_BASE_URL: QUOTIO_URL,
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(quotioWindow(m)[2]),
   ANTHROPIC_DEFAULT_OPUS_MODEL: m, ANTHROPIC_DEFAULT_SONNET_MODEL: m, ANTHROPIC_DEFAULT_HAIKU_MODEL: m, CLAUDE_CODE_SUBAGENT_MODEL: m } });
 // Permission modes as each CLI has them (Claude: --permission-mode, or
 // --dangerously-skip-permissions for full access; Codex: its sandbox and approvals).
@@ -109,7 +113,7 @@ export function parseDefaults(kind, stdout) {
     } catch {}
   }
   let quotio = [];
-  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).map((m) => m.id).filter(Boolean); } catch {}
+  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).map((m) => m.id).filter((id) => id && !/image/.test(id)); } catch {}
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null, quotio }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
@@ -134,7 +138,7 @@ export function current(kind, argv, meta, dflt) {
     const per = meta.model ? dflt.per?.[meta.model] ?? dflt.per?.[meta.model.replace(/-\d+$/, "")] : null;
     const perm = argv.includes("--dangerously-skip-permissions") ? "bypassPermissions" : flag(argv, "--permission-mode") ?? dflt.mode ?? "manual";
     return { agent: "claude", model: meta.model ?? alias, alias, ...(proxied ? { label: `${proxied} · Quotio` } : {}), effort: meta.effort ?? flag(argv, "--effort") ?? per ?? dflt.effort,
-      fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (big ? 1000000 : 200000) };
+      fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (proxied ? quotioWindow(proxied)[1] : big ? 1000000 : 200000) };
   }
   const o = overrides(argv);
   const tier = o.service_tier;
