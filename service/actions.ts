@@ -237,7 +237,7 @@ async function startFresh(hub: Hub, b: any, compat: Compat): Promise<any> {
   const tpl = await execTemplate(hub, "assistant", sp.machine ?? null, compat.assistantPick?.(sp.id) ?? null);
   // when it began to go in, by this clock: the page knows its message again in the chat by it, as any send's
   const at = Date.now();
-  const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, tpl.name, task]);
+  const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, ...tpl.labels, tpl.name, task]);
   tpl.done();
   let out: any = {};
   try { out = JSON.parse(r.stdout || "{}"); } catch {}
@@ -443,7 +443,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     }
     return { ok: true };
   }
-  if (b?.type === "model-pin" && compat.agents && ["claude", "codex", "pi"].includes(b.agent) && typeof b.model === "string" && /^[\w.\[\]-]{1,60}$/.test(b.model)) {
+  if (b?.type === "model-pin" && compat.agents && ["claude", "codex", "pi"].includes(b.agent) && typeof b.model === "string" && /^[\w.:\[\]-]{1,60}$/.test(b.model)) {
     // the model menu's star: pinned to the top of its agent's list (core/agents.js PICKS_FILE)
     return { ok: true, picks: (compat.agents as any).pin(b.agent, b.model) };
   }
@@ -456,7 +456,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       // pick only changes that choice (nothing runs yet), kept in the shared document (CHOICE_KEY)
       if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).freshMenu(fresh.machine, compat.assistantPick?.(fresh.id) ?? null) };
       if (!["claude", "codex", "pi"].includes(b.kind)) throw new Error("Pick Claude Code, Codex or Pi.");
-      const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : null);
+      const opt = (v: unknown) => (typeof v === "string" && /^[\w.:\[\]-]{1,60}$/.test(v) ? v : null);
       if (!compat.shared) throw new Error("The choice couldn't be kept.");
       await compat.shared.set(CHOICE_KEY, withChoice(compat.shared.value(CHOICE_KEY), fresh.id, { agent: b.kind, model: opt(b.model), effort: opt(b.effort), fast: speedOf(opt(b.speed)), perm: opt(b.perm) }));
       return { ok: true, chosen: true };
@@ -465,7 +465,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.type === "restart-info") return compat.agents.info(a, reader);
     if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).menu(a, reader) };
     if (!["claude", "codex", "pi"].includes(b.kind)) throw new Error("Pick Claude Code, Codex or Pi.");
-    const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
+    const opt = (v: unknown) => (typeof v === "string" && /^[\w.:\[\]-]{1,60}$/.test(v) ? v : undefined);
     const pick = { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) };
     // the model menu (live): in place when only the model, level or Fast changes; the restart sheet restarts
     if (b.live === true) return { ok: true, ...(await (compat.agents as any).change(a, reader, pick)) };

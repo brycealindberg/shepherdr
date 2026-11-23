@@ -86,19 +86,20 @@ export async function newSpaceInfo(hub: Hub, machine: string | null, at: string 
  *  isn't installed there (then the template's own, as the window). Neither installed: refused in plain words, never a
  *  start that ends at once ("exec: claude: not found") and leaves the chat on Starting.
  *  words: the template's own words (its first message), when read. Unreadable: the template itself. */
-export async function execTemplate(hub: Hub, name: string, machine: string | null, pick: any = null): Promise<{ name: string; words: string; done: () => void }> {
-  const plain = { name, words: "", done: () => {} };
+export async function execTemplate(hub: Hub, name: string, machine: string | null, pick: any = null): Promise<{ name: string; words: string; done: () => void; labels: string[] }> {
+  const plain = { name, words: "", done: () => {}, labels: [] as string[] };
   const DIR = TEMPLATES_SH + 'dir="$SHEP_TEMPLATES"; ';   // where herdr-core reads them there (#1182)
   const src = (await exec(hub, ["sh", "-c", DIR + 'cat "$dir/$1.md"', "x", name], machine).catch(() => null))?.stdout ?? "";
   const head = /^---\n([\s\S]*?)\n---\n?/.exec(src);
   const own = /^command:[ \t]*(.+)$/m.exec(head?.[1] ?? "")?.[1]?.trim();
   if (!head || !own) return plain;
   const has = async (prog: string) => (await exec(hub, ["sh", "-c", `${AGENT_PATH} command -v "$1" >/dev/null 2>&1`, "x", prog], machine).catch(() => null))?.code === 0;
-  let cmd = own;
+  let cmd = own, agent: string | null = null;
   if (pick?.agent === "claude" || pick?.agent === "codex" || pick?.agent === "pi") {
     if (await has(pick.agent)) {
       const mcp = pick.agent === "codex" && /^quotio:/.test(pick.model ?? "") ? parseDefaults("codex", (await sh(hub, DEFAULTS, ["defaults", "codex"], machine).catch(() => null))?.stdout ?? "").mcp : undefined;
       cmd = argvFor({ ...pick, mcp }, { agent: null, argv: [] }).argv.map(shellWord).join(" ");
+      agent = pick.agent;
     }
     else if (!(await has(own.split(/\s+/)[0]))) {
       throw new Error(`${(NAMES as Record<string, string>)[pick.agent] ?? pick.agent} isn't installed on ${machine ?? "this computer"}. Install it, or pick another agent for the Assistant in Settings › Agents.`);
@@ -108,7 +109,7 @@ export async function execTemplate(hub: Hub, name: string, machine: string | nul
   const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (Shepherdr's service), removed after use.\ncommand: ${cleanCommand(cmd)}\n---\n${src.slice(head[0].length)}`;
   const w = await exec(hub, ["sh", "-c", DIR + 'printf "%s" "$2" > "$dir/$1.md"', "x", one, file], machine).catch(() => null);
   if (w?.code !== 0) return plain;
-  return { name: one, words: src.slice(head[0].length).trim(), done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };
+  return { name: one, words: src.slice(head[0].length).trim(), labels: agent ? ["--label", `herdr.agent=${agent}`] : [], done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };
 }
 
 /** One word of a command line for sh, quoted only when it needs it (as mods/chat's). */
@@ -162,7 +163,7 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   let t: Awaited<ReturnType<typeof execTemplate>>;
   try { t = await execTemplate(hub, "assistant", machine, chosen); } catch (e) { await keep(); throw e; }
   const r = await run(["hc", "run", "--bg", "--keep", "--no-parent", ...(machine ? ["--on", machine] : []), "--cwd", abs,
-    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, t.name]).catch((e) => ({ code: 127, out: "", err: String(e) }));
+    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, ...t.labels, t.name]).catch((e) => ({ code: 127, out: "", err: String(e) }));
   t.done();
   // its Assistant didn't start (SHEP-294): the space stays, and its chat starts one with its first message (actions.ts)
   if (r.code !== 0) await keep();

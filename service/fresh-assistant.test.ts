@@ -104,6 +104,12 @@ test("the model menu opens on that choice, and a pick only changes it: kept for 
   expect(((await act(hub, { type: "model-menu", chat: "p:sp1" }, compat)) as any).menu.current.model).toBe("gpt-6-luna");
 });
 
+test("a Quotio model picked in the menu is kept, not dropped for its colon", async () => {
+  const { compat, doc } = world();
+  expect(await act(hub, { type: "restart", chat: "p:sp1", kind: "pi", model: "quotio:gemini-3.5-flash-lite", effort: "high", perm: "full" }, compat)).toEqual({ ok: true, chosen: true });
+  expect(choiceOf(doc[CHOICE_KEY], "sp1")?.model).toBe("quotio:gemini-3.5-flash-lite");
+});
+
 test("the first message starts it on the choice (Codex, its model, service_tier ultrafast), then forgets the choice", async () => {
   const { compat, doc } = world({ agent: "claude", model: "opus", effort: null, fast: false, perm: "manual" });
   // the window's chat (or the web's menu) chose Sol on Ultrafast for this space before the first message

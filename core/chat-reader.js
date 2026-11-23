@@ -13,7 +13,10 @@ export const KEEP = 2000;
 export const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex", pi: "pi" };
 
 // The CLI a terminal runs, as the chat knows them ("claude", "codex"), else null.
-export const kindOf = (t) => KINDS[t?.status?.app] ?? KINDS[t?.foreground?.name] ?? null;
+export const kindOf = (t) => KINDS[t?.status?.app] ?? KINDS[t?.foreground?.name] ?? KINDS[scriptOf(t?.foreground?.argv)] ?? null;
+
+// npm's pi runs as `node …/bin/pi`: herdr names it "node", so its script's name says which CLI it is
+const scriptOf = (argv) => (Array.isArray(argv) && /(^|\/)node$/.test(argv[0] ?? "") ? String(argv[1] ?? "").split("/").pop() : null);
 
 export class ChatReader {
   constructor(io, addr) {

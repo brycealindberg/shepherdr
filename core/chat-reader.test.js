@@ -6,6 +6,9 @@ test("a terminal runs pi when its report or its program says so", () => {
   expect(kindOf({ foreground: { name: "pi" } })).toBe("pi");
   expect(kindOf({ foreground: { name: "claude" } })).toBe("claude");
   expect(kindOf({ foreground: { name: "bash" } })).toBe(null);
+  // npm's pi runs under node: herdr names its foreground "node"
+  expect(kindOf({ foreground: { name: "node", argv: ["node", "/opt/homebrew/bin/pi", "--model", "quotio/x"] } })).toBe("pi");
+  expect(kindOf({ foreground: { name: "node", argv: ["node", "/srv/app/server.js"] } })).toBe(null);
 });
 
 const live = (more = {}) => ({ state: "live", status: { app: "pi" }, foreground: { name: "pi", pid: 42 }, turn: 0, ...more });

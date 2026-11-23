@@ -64,9 +64,10 @@ test("a Codex Quotio Assistant turns off the MCP servers in its config.toml", as
 
 test("a Pi pick starts pi on its Quotio model, not the template's claude", async () => {
   const { hub, made } = machine(["pi", "claude"]);
-  await execTemplate(hub, "assistant", null, { agent: "pi", model: "quotio:gemini-3.8-flash-high", effort: "high", fast: false, perm: null });
+  const t = await execTemplate(hub, "assistant", null, { agent: "pi", model: "quotio:gemini-3.8-flash-high", effort: "high", fast: false, perm: null });
   const cmd = commandOf(made()[0]);
   expect(cmd).toContain("exec pi ");
   expect(cmd).toContain("--model quotio/gemini-3.8-flash-high:high");
   expect(cmd).not.toMatch(/exec claude/);
+  expect(t.labels).toEqual(["--label", "herdr.agent=pi"]);
 });
