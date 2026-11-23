@@ -44,6 +44,7 @@ import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as SPm from "../core/spaces.js";
 import { createScreens, SCREEN_PASSWORD } from "./screens.ts";
+import { counts, countClose, countOpen, timed } from "./stats.ts";
 import { voiceCall, callToResume, callsOn, handOff, type ChatView } from "./voice.ts";
 import type { HearIO } from "./voice-hear.ts";
 import type { VoiceIO } from "./voice-tools.ts";
@@ -828,11 +829,11 @@ const server = Bun.serve<{ who: string }>({
   // a send with many pictures (copied to another machine, Claude Code reading each) can take longer than Bun's 10 s
   // default: cut off, the page took it as failed while it still went in (SHEP-93)
   idleTimeout: 180,
-  async fetch(req, srv) {
+  fetch: (req, srv) => timed(req, async () => {
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the CLI asks this (bin/shepherdr): jobs says this service runs the background work
-    if (path === "/api/health") return json({ ok: true, app: "shepherdr", ...(localCaller(req, PORT) ? { id: SERVICE_ID, calls: callsOn() } : {}), version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
+    if (path === "/api/health") return json({ ok: true, app: "shepherdr", ...(localCaller(req, PORT) ? { id: SERVICE_ID, calls: callsOn(), ...counts } : {}), version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
       // the other machines this service ticks (Serve from: the host the ones with no service of their own)
       ticks: jobs.on ? host.tickOn() : [] });
     // SHEPHERDR_WEB=off: nothing for the tailnet (this machine's own callers still get the API)
@@ -1076,9 +1077,10 @@ const server = Bun.serve<{ who: string }>({
     }
     if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
     return file(path);
-  },
+  }),
   websocket: {
     open(ws) {
+      countOpen();
       const d: any = ws.data;
       const page = { send: (x: any) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() };
       d.page = page;
@@ -1097,7 +1099,7 @@ const server = Bun.serve<{ who: string }>({
     },
     message(ws, msg) { const d: any = ws.data; if (d.voice || d.desktop) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
     // a call's page that went without ending it holds the call for it to come back (SHEP-102)
-    close(ws) { const d: any = ws.data; if (d.voice) d.bridge?.detach(d.page); else if (d.bridge) d.bridge.end(); else live.leave(ws); },
+    close(ws, code) { countClose(code); const d: any = ws.data; if (d.voice) d.bridge?.detach(d.page); else if (d.bridge) d.bridge.end(); else live.leave(ws); },
     // SHEP-173: a muted call sends nothing for minutes (Bun's default closes a quiet socket after 120 s); pages ping too
     idleTimeout: 600,
   },
