@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as AGall from "./agents.js";
 import { argvFor, contextWords, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
 
@@ -342,6 +345,37 @@ test("a Quotio Codex agent shows its row; a restart to another model leaves the 
   const again = qCodex({ agent: "codex", argv });
   expect(cfg(again).filter((x) => x === "model_provider=quotio").length).toBe(1);
   expect(again.filter((x) => x === "hooks").length).toBe(1);
+});
+
+const off = (argv) => cfg(argv).filter((x) => /^mcp_servers\./.test(x));
+
+test("Codex's defaults list the MCP servers of config.toml, whole servers only", () => {
+  const home = mkdtempSync(join(tmpdir(), "shep-"));
+  mkdirSync(join(home, ".codex"));
+  writeFileSync(join(home, ".codex", "config.toml"), 'model = "gpt-6"\n[mcp_servers.notion]\nurl = "x"\n[mcp_servers.api-anything]\ncommand = "y"\n[mcp_servers.notion.http_headers]\na = "b"\n[mcp_servers.rea.env]\nA = "1"\n');
+  const run = Bun.spawnSync(["sh", "-c", AGall.DEFAULTS, "defaults", "codex"], { env: { PATH: process.env.PATH, HOME: home } });
+  expect(parseDefaults("codex", run.stdout.toString()).mcp).toEqual(["notion", "api-anything"]);
+  expect(parseDefaults("codex", "model\tx\n").mcp).toEqual([]);
+});
+
+test("a Quotio Codex pick turns its MCP servers off, a normal Codex pick keeps them", () => {
+  const pick = (model) => argvFor({ agent: "codex", model, mcp: ["notion", "api-anything"] }, { agent: "codex", argv: ["codex"] }).argv;
+  expect(off(pick("quotio:gemini-4-hydrogen-xhigh"))).toEqual(["mcp_servers.notion.enabled=false", "mcp_servers.api-anything.enabled=false"]);
+  expect(off(pick("gpt-6"))).toEqual([]);
+});
+
+test("a restart of a Quotio Codex recomputes its MCP flags: once each, the new list, none off the proxy", () => {
+  const argv = argvFor({ agent: "codex", model: "quotio:gemini-4-hydrogen-xhigh", mcp: ["notion"] }, { agent: "codex", argv: ["codex"] }).argv;
+  const go = (pick) => argvFor({ agent: "codex", model: "quotio:gemini-4-hydrogen-xhigh", ...pick }, { agent: "codex", argv, session: "S1" }).argv;
+  expect(off(go({ mcp: ["notion"] }))).toEqual(["mcp_servers.notion.enabled=false"]);
+  expect(off(go({ mcp: ["rea"] }))).toEqual(["mcp_servers.rea.enabled=false"]);
+  expect(off(go({}))).toEqual(["mcp_servers.notion.enabled=false"]);
+  expect(off(argvFor({ agent: "codex", model: "gpt-6", mcp: ["notion"] }, { agent: "codex", argv, session: "S1" }).argv)).toEqual([]);
+});
+
+test("a Quotio Codex chat keeps its MCP flags once on resume and fork", () => {
+  const argv = argvFor({ agent: "codex", model: "quotio:gemini-4-hydrogen-xhigh", mcp: ["notion", "rea"] }, { agent: "codex", argv: ["codex"] }).argv;
+  for (const out of [resumeArgv("codex", argv, "abc"), forkArgv("codex", argv, "abc")]) expect(off(out)).toEqual(["mcp_servers.notion.enabled=false", "mcp_servers.rea.enabled=false"]);
 });
 
 test("a Quotio Codex chat resumes and forks on the proxy", () => {

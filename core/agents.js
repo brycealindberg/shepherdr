@@ -26,7 +26,10 @@ const quotioSettings = (m) => ({ fastMode: false, apiKeyHelper: QUOTIO_KEY, env:
 // WARNING: Antigravity answers a coding agent's own system prompt with a fake 429, so Codex on Quotio runs on a plain one, without AGENTS.md, skills, hooks or plugins.
 const QUOTIO_PROMPT = "You are a helpful assistant. Help users inspect files, run commands, and modify code.";
 const QUOTIO_CODEX_KEYS = /^(model_provider|model_providers\.quotio|instructions|project_doc_max_bytes|skills\.include_instructions)=/;
-const quotioCodex = (m) => ["-m", m, "-c", "model_provider=quotio",
+const MCP_OFF = /^mcp_servers\.([^.=]+)\.enabled=false$/;
+const mcpOff = (argv) => argv.flatMap((a, i) => (argv[i - 1] === "-c" && MCP_OFF.test(a) ? [MCP_OFF.exec(a)[1]] : []));
+// WARNING: Codex on a non-OpenAI provider sends every MCP tool schema on every request (~220k tokens against ~77k), so its Quotio rows turn the servers off one by one: -c mcp_servers={} does nothing.
+const quotioCodex = (m, mcp = []) => ["-m", m, ...mcp.flatMap((n) => ["-c", `mcp_servers.${n}.enabled=false`]), "-c", "model_provider=quotio",
   "-c", `model_providers.quotio={name="quotio",base_url="${QUOTIO_URL}/v1",wire_api="responses",auth={command="sh",args=["-c",${JSON.stringify(QUOTIO_KEY)}]}}`,
   "-c", `instructions="${QUOTIO_PROMPT}"`, "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", "--disable", "hooks", "--disable", "plugins"];
 // WARNING: pi runs from the quotio.ts extension shepherdr installs, and its thinking levels are its own.
@@ -93,6 +96,7 @@ elif [ "$1" = codex ]; then
   for k in model model_reasoning_effort service_tier sandbox_mode approval_policy; do
     printf '%s\\t%s\\n' "$k" "$(sed -n "s/^$k[[:space:]]*=[[:space:]]*\\"\\{0,1\\}\\([^\\"]*\\)\\"\\{0,1\\}.*/\\1/p" "$f" 2>/dev/null | head -1)"
   done
+  printf 'mcp\\t%s\\n' "$(sed -n 's/^\\[mcp_servers\\.\\([A-Za-z0-9_-]*\\)\\][[:space:]]*$/\\1/p' "$f" 2>/dev/null | tr '\\n' ' ')"
   c="$HOME/.codex/models_cache.json"
   [ -f "$c" ] && { printf 'models\\t'; tr -d '\\n' < "$c"; echo; }
 fi
@@ -129,7 +133,7 @@ export function parseDefaults(kind, stdout) {
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null, quotio }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
-      sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models, quotio };
+      mcp: (out.mcp ?? "").split(/\s+/).filter(Boolean), sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models, quotio };
 }
 
 // What the agent runs on now: { agent, model, effort, fast, used, window, alias }.
@@ -387,7 +391,7 @@ function kept(kind, argv) {
       if (i === 0 && (a === "resume" || a === "fork")) { if (rest[1] && !rest[1].startsWith("-")) i++; continue; }
       if (a === "--no-daemon" || a === "--dangerously-bypass-approvals-and-sandbox" || a === "--full-auto") continue;
       if (["-m", "--model", "-s", "--sandbox", "-a", "--ask-for-approval"].includes(a)) { i++; continue; }
-      if ((a === "-c" || a === "--config") && (/^(model|model_reasoning_effort|service_tier)=/.test(rest[i + 1] ?? "") || QUOTIO_CODEX_KEYS.test(rest[i + 1] ?? ""))) { i++; continue; }
+      if ((a === "-c" || a === "--config") && (/^(model|model_reasoning_effort|service_tier)=/.test(rest[i + 1] ?? "") || QUOTIO_CODEX_KEYS.test(rest[i + 1] ?? "") || (quotio && MCP_OFF.test(rest[i + 1] ?? "")))) { i++; continue; }
       if (quotio && a === "--disable" && /^(hooks|plugins)$/.test(rest[i + 1] ?? "")) { i++; continue; }
       if (CODEX_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
       if (a.startsWith("-")) out.push(a);
@@ -481,7 +485,7 @@ export function argvFor(pick, old) {
   // Codex runs its commands outside hc without --no-daemon (as herdr-task and restart.sh add).
   const a = [...flags, "--no-daemon"];
   const q = /^quotio:(.+)$/.exec(pick.model ?? "")?.[1];
-  if (q) a.push(...quotioCodex(q));
+  if (q) a.push(...quotioCodex(q, pick.mcp ?? mcpOff(old.argv ?? [])));
   else if (pick.model) a.push("-m", pick.model);
   if (pick.effort) a.push("-c", `model_reasoning_effort="${pick.effort}"`);
   // always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
@@ -519,7 +523,7 @@ export function forkArgv(kind, argv, session) {
     ? ["--model", "--effort", "--settings"].flatMap((f) => { const v = flag(argv, f); return v ? [f, v] : []; })
     : (() => {
       const m = flag(argv, "-m", "--model"), o = overrides(argv);
-      return [...(m && o.model_provider === "quotio" ? quotioCodex(m) : m ? ["-m", m] : []), "--no-daemon",
+      return [...(m && o.model_provider === "quotio" ? quotioCodex(m, mcpOff(argv)) : m ? ["-m", m] : []), "--no-daemon",
         ...["model_reasoning_effort", "service_tier"].flatMap((k) => (o[k] ? ["-c", `${k}="${o[k]}"`] : []))];
     })();
   const flags = [...kept(kind, argv), ...same];
