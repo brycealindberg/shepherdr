@@ -243,3 +243,35 @@ test("liveAgent names the model the terminal runs, from its CLI's arguments, els
   const cx = { foreground: { argv: ["codex", "--no-daemon", "-m", "gpt-6.2-sol", "-c", "service_tier=\"ultrafast\""] } };
   expect(liveAgent("codex", cx, {}, codexDflt)).toMatchObject({ kind: "codex", model: "gpt-6.2-sol", modelLabel: "GPT-6.2 Sol", speed: "ultrafast" });
 });
+
+// Quotio: its local proxy's models (CLIProxyAPI on 127.0.0.1:8317) are Claude Code rows, started through the proxy
+const quotioOut = `model\topus\nquotio\t{"object":"list","data":[{"id":"gemini-3.8-flash-high","object":"model","owned_by":"antigravity"},{"id":"gpt-oss-120b-medium","object":"model"}]}\n`;
+test("Quotio's models show in the Claude Code menu, none when its proxy is down", () => {
+  const ids = menuFor("claude", parseDefaults("claude", quotioOut)).models.map((m) => m.id);
+  expect(ids).toContain("quotio:gemini-3.8-flash-high");
+  expect(ids).toContain("quotio:gpt-oss-120b-medium");
+  expect(ids).toContain("opus");
+  expect(menuFor("claude", parseDefaults("claude", "model\topus\nquotio\t\n")).models.some((m) => m.id.startsWith("quotio:"))).toBe(false);
+});
+
+test("a Quotio pick starts Claude Code on that model through the proxy, its key never in argv", () => {
+  const { argv } = argvFor({ agent: "claude", model: "quotio:gemini-3.8-flash-high", effort: "high", fast: true }, { agent: "claude", argv: ["claude"] });
+  expect(argv.slice(argv.indexOf("--model"), argv.indexOf("--model") + 2)).toEqual(["--model", "gemini-3.8-flash-high"]);
+  const s = JSON.parse(argv[argv.indexOf("--settings") + 1]);
+  expect(s.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8317");
+  // background calls and subagents stay on the proxy's model, not a Claude model the proxy lacks
+  expect(s.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("gemini-3.8-flash-high");
+  expect(s.env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("gemini-3.8-flash-high");
+  expect(s.apiKeyHelper).toContain("cliproxyapi.conf");
+  expect(s.fastMode).toBe(false);
+});
+
+test("a Quotio agent shows its row, and a restart back to Opus leaves the proxy", () => {
+  const { argv } = argvFor({ agent: "claude", model: "quotio:gpt-oss-120b-medium" }, { agent: "claude", argv: ["claude"] });
+  const c = current("claude", argv, { model: "gpt-oss-120b-medium" }, {});
+  expect(rowFor("claude", c)).toBe("quotio:gpt-oss-120b-medium");
+  expect(line(c)).toContain("Quotio");
+  const back = argvFor({ agent: "claude", model: "opus" }, { agent: "claude", argv, session: "S1" }).argv;
+  expect(back.join(" ")).not.toContain("8317");
+  expect(back).toContain("opus");
+});

@@ -14,6 +14,11 @@ const CLAUDE_MODELS = [
   { id: "haiku", name: "Haiku 5.5", match: ["haiku", "claude-haiku-5-5"] },
 ];
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// WARNING: Quotio's key is read by apiKeyHelper where the agent runs, never put in argv (ps and task records show argv).
+const QUOTIO_URL = "http://127.0.0.1:8317";
+const QUOTIO_KEY = `awk '/^api-keys:/{f=1;next} f&&/^ *- /{gsub(/^ *- *"?|"? *$/,"");print;exit}' /opt/homebrew/etc/cliproxyapi.conf`;
+const quotioSettings = (m) => ({ fastMode: false, apiKeyHelper: QUOTIO_KEY, env: { ANTHROPIC_BASE_URL: QUOTIO_URL,
+  ANTHROPIC_DEFAULT_OPUS_MODEL: m, ANTHROPIC_DEFAULT_SONNET_MODEL: m, ANTHROPIC_DEFAULT_HAIKU_MODEL: m, CLAUDE_CODE_SUBAGENT_MODEL: m } });
 // Permission modes as each CLI has them (Claude: --permission-mode, or
 // --dangerously-skip-permissions for full access; Codex: its sandbox and approvals).
 const PERMS = {
@@ -69,6 +74,7 @@ export const DEFAULTS = `
 if [ "$1" = claude ]; then
   f="$HOME/.claude/settings.json"
   command -v jq >/dev/null && [ -f "$f" ] && jq -r '"model\\t\\(.model // "")", "effort\\t\\(.effortLevel // "")", "fast\\t\\(if .fastMode == true then "on" else "" end)", "per\\t\\(.modelSettings // {} | with_entries(.value |= (.effortLevel // null)) | tojson)", "mode\\t\\(.permissions.defaultMode // "")"' "$f" 2>/dev/null
+  k=$(${QUOTIO_KEY} 2>/dev/null) && [ -n "$k" ] && { printf 'quotio\\t'; curl -s -m 2 -H "Authorization: Bearer $k" ${QUOTIO_URL}/v1/models | tr -d '\\n'; echo; }
 else
   f="$HOME/.codex/config.toml"
   for k in model model_reasoning_effort service_tier sandbox_mode approval_policy; do
@@ -102,8 +108,10 @@ export function parseDefaults(kind, stdout) {
       }));
     } catch {}
   }
+  let quotio = [];
+  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).map((m) => m.id).filter(Boolean); } catch {}
   return kind === "claude"
-    ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null }
+    ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null, quotio }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
       sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models };
 }
@@ -115,16 +123,17 @@ export function current(kind, argv, meta, dflt) {
   dflt = dflt ?? {};
   if (kind === "claude") {
     // a /model in place (SHEP-181) names the row it switched to, its 1M too, which the log's turns don't say
-    const alias = meta.alias ?? flag(argv, "--model") ?? dflt.model;
-    let fast = dflt.fast;
     const s = flag(argv, "--settings");
+    const proxied = s?.includes(QUOTIO_URL) && flag(argv, "--model");
+    const alias = meta.alias ?? (proxied ? `quotio:${proxied}` : null) ?? flag(argv, "--model") ?? dflt.model;
+    let fast = dflt.fast;
     if (s && /"fastMode"\s*:\s*(true|false)/.test(s)) fast = /"fastMode"\s*:\s*true/.test(s);
     if (meta.speed) fast = speedOf(meta.speed) === true;
     const big = /\[1m\]/.test(alias ?? "") || (meta.used ?? 0) > 200000;
     // Claude keeps an effort per model (modelSettings), known once the log names the model.
     const per = meta.model ? dflt.per?.[meta.model] ?? dflt.per?.[meta.model.replace(/-\d+$/, "")] : null;
     const perm = argv.includes("--dangerously-skip-permissions") ? "bypassPermissions" : flag(argv, "--permission-mode") ?? dflt.mode ?? "manual";
-    return { agent: "claude", model: meta.model ?? alias, alias, effort: meta.effort ?? flag(argv, "--effort") ?? per ?? dflt.effort,
+    return { agent: "claude", model: meta.model ?? alias, alias, ...(proxied ? { label: `${proxied} · Quotio` } : {}), effort: meta.effort ?? flag(argv, "--effort") ?? per ?? dflt.effort,
       fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (big ? 1000000 : 200000) };
   }
   const o = overrides(argv);
@@ -201,6 +210,7 @@ export function menuFor(agent, dflt, current = null) {
     const models = CLAUDE_MODELS.map((m) => ({ id: m.id, name: m.name, efforts: CLAUDE_EFFORTS,
       defaultEffort: dflt?.per?.[m.match[1].replace(/\[1m\]$/, "")] ?? dflt?.effort ?? null, fast: m.id.startsWith("opus") }));
     // a model typed by id (an older one it still takes) stays in the list while it runs
+    for (const id of dflt?.quotio ?? []) models.push({ id: `quotio:${id}`, name: `${id} · Quotio`, efforts: CLAUDE_EFFORTS, defaultEffort: dflt?.effort ?? null, fast: false });
     if (current && !models.some((m) => m.id === current)) models.unshift({ id: current, name: modelName(current), efforts: CLAUDE_EFFORTS, defaultEffort: dflt?.effort ?? null, fast: false });
     return { name: NAMES.claude, perms: PERMS.claude, models };
   }
@@ -296,6 +306,7 @@ export function modelSections(menus, agent, picks, q) {
 // The picker row that is what runs now (`c` from current()), or the model as it is.
 export function rowFor(agent, c) {
   if (agent !== "claude") return c?.model ?? null;
+  if (c?.alias?.startsWith("quotio:")) return c.alias;
   const has = (m, x) => (m.match ?? [m.id]).includes(x);
   // What runs (the log's model) wins; the alias it was started with only tells which row of
   // that model (Opus or Opus 1M), since the log names both alike.
@@ -407,9 +418,10 @@ export function argvFor(pick, old) {
   const flags = same ? kept(pick.agent, old.argv ?? []) : [];
   if (pick.agent === "claude") {
     const a = ["claude", ...flags];
-    if (pick.model) a.push("--model", pick.model);
+    const q = /^quotio:(.+)$/.exec(pick.model ?? "")?.[1];
+    if (pick.model) a.push("--model", q ?? pick.model);
     if (pick.effort) a.push("--effort", pick.effort);
-    a.push("--settings", JSON.stringify({ fastMode: Boolean(pick.fast) }));
+    a.push("--settings", JSON.stringify(q ? quotioSettings(q) : { fastMode: Boolean(pick.fast) }));
     if (pick.perm === "bypassPermissions") a.push("--dangerously-skip-permissions");
     else if (pick.perm) a.push("--permission-mode", pick.perm === "manual" ? "default" : pick.perm);
     if (same && old.session) return { argv: [...a, "--resume", old.session], resume: true, base: a };
