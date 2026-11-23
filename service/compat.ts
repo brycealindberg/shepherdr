@@ -13,6 +13,8 @@ import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
 import { taskArtifacts, titleInTask } from "../core/task-artifacts.js";
 const { summary, names } = CL as any;
+// WARNING: pi never gets the template in its system prompt, so a short first message there is the person's own words
+const TEMPLATE_MIN = 500;
 const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
@@ -576,7 +578,7 @@ export class Compat {
         x = { ...x, text: ft };
       }
       // not typed by the person: a launch brief or another agent's message, as one quiet row
-      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender, ...peers, first: fi }) : null;
+      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template: String(x.text ?? "").length < TEMPLATE_MIN ? null : template, task, sender, ...peers, first: fi }) : null;
       if (brief === "Task brief" && taskRow) {
         messages.push(this.briefMessage(taskRow, x.id, "read", String(x.text ?? ""), x.at));
         briefShown = true;

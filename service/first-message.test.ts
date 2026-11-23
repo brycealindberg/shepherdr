@@ -37,3 +37,12 @@ test("the template folds, the person's first words are their own bubble, no news
   const rows = chat.messages.map((m: any) => (m.news ? `news ${m.news.ref}` : m.brief ? `brief ${m.brief.label}` : `${m.who}: ${m.text}`));
   expect(rows).toEqual(["brief New session", `you: ${asked}`, "agent: Got it.", "you: Name it <project> please"]);
 });
+
+// WARNING: pi's system prompt is its own: a first message to a pi Assistant that began empty has no template in it
+test("a first message without the template in it is the person's bubble", async () => {
+  const c = await conv([user("p0", "run: echo shep-42 and reply with only its output", 0), said("a0", "shep-42", 1)]);
+  const compat = new Compat() as any;
+  compat.firstTask = () => null;
+  const chat = compat.chat("p:local:s1", { conv: c, start: 0, machine: null, addr: "t9", kind: "pi" }, { template: "herdr-assistant", labels: {} });
+  expect(chat.messages.map((m: any) => (m.brief ? `brief ${m.brief.label}` : `${m.who}: ${m.text}`))).toEqual(["you: run: echo shep-42 and reply with only its output", "agent: shep-42"]);
+});
