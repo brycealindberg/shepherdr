@@ -128,7 +128,7 @@ describe("the working line says what the agent does, in the window and on the we
     expect(doingWords(null, "")).toBe(null);
   });
   test("both sides read it from here", () => {
-    for (const f of ["service/compat.ts"]) for (const fn of ["reportMsg(", "doingWords("]) expect(read(f).includes(fn) ? "" : `${fn} not in ${f}`).toBe("");
+    for (const f of ["service/compat.ts"]) for (const fn of ["reportMsg(", "doingWords(", "waitingOn("]) expect(read(f).includes(fn) ? "" : `${fn} not in ${f}`).toBe("");
   });
 });
 
