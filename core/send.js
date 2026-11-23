@@ -132,13 +132,15 @@ export async function steerNow(io, addr, opts = STEER, body = null) {
   }
   if (!seen) return false;
   await io.hc(["keys", addr, "ctrl+enter"]);
+  let screen = "";
   for (let i = 0; i < opts.grace; i++) {
     await io.sleep(opts.every);
-    const screen = await screenOf(io, addr);
+    screen = await screenOf(io, addr);
     // in, or its turn ended (what is queued goes in by itself), or a dialog came up: never a key on that
     if (!QUEUED.test(screen) || !atWork(io, screen)) return true;
   }
   // still queued behind something Ctrl+Enter didn't move: Esc stops the turn and the queue goes in at once
+  if (!answered(screen)) return true;
   await io.hc(["keys", addr, "esc"]);
   for (let i = 0; i < opts.after; i++) {
     await io.sleep(opts.every);
@@ -146,6 +148,21 @@ export async function steerNow(io, addr, opts = STEER, body = null) {
     if (QUEUED.test(screen)) continue;
     if (body && holds(inputLine(screen), body, true)) await io.hc(["keys", addr, "enter"]).catch(() => null);
     return true;
+  }
+  return true;
+}
+
+// WARNING: Claude Code 2.1.328 on Esc before any answer glues the last message to the queued one and resends it.
+// The turn has answered: a "●" line under its own message (a queued one has "⎿  Queued" under it), or that message
+// is off the screen.
+export function answered(screen) {
+  const lines = String(screen ?? "").split("\n");
+  let top = lines.length;
+  for (let i = lines.length - 1; i > 0; i--) if (lines[i].startsWith("❯") && /^\s*─/.test(lines[i - 1])) { top = i - 1; break; }
+  let said = false;
+  for (let i = top - 1; i >= 0; i--) {
+    if (lines[i].startsWith("●")) said = true;
+    else if (lines[i].startsWith("❯") && !/^\s*⎿\s+Queued\b/.test(lines[i + 1] ?? "")) return said;
   }
   return true;
 }

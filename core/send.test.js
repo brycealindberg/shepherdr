@@ -312,6 +312,23 @@ test("a message still queued after Ctrl+Enter's grace goes in by Esc, once", asy
   expect(took.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter"]);
 });
 
+// WARNING: Claude Code 2.1.328 on Esc before any answer glues the last message to the queued one and resends it.
+const STALLED = `● Done. 22 GB is free.
+❯ B yes only things not needed 100% double check
+✻ Thinking… (13m 2s · ↓ 0 tokens)
+❯ hows it going
+  ⎿  Queued · ctrl+enter to send now
+─────────────────────────────────────────────
+❯ Press up to edit queued messages
+─────────────────────────────────────────────
+  ⏵⏵ auto mode on · esc to interrupt`;
+
+test("Esc is never pressed on a turn with no answer yet: it would glue the person's messages", async () => {
+  const s = screens([...Array(2 + STEER.grace).fill(STALLED)]);
+  expect(await steerNow(s.io, "t1", STEER, "hows it going")).toBe(true);
+  expect(s.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter"]);
+});
+
 test("Esc never lands on a dialog or an agent that stopped working meanwhile", async () => {
   let n = 0;
   const asking = screens([QUEUED_2_1_330], () => (n++ < 2 ? "working" : "blocked"));
