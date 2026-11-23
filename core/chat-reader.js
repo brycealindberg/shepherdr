@@ -10,7 +10,7 @@ import { starting } from "./screens.js";
 
 export const PAGE = 200;
 export const KEEP = 2000;
-export const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+export const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex", pi: "pi" };
 
 // The CLI a terminal runs, as the chat knows them ("claude", "codex"), else null.
 export const kindOf = (t) => KINDS[t?.status?.app] ?? KINDS[t?.foreground?.name] ?? null;
@@ -56,7 +56,7 @@ export class ChatReader {
       // The agent's last recorded log is still readable when a page opens after it stopped.
       let saved = null;
       try { saved = JSON.parse(t.labels?.["herdr.resume"] || "null"); } catch {}
-      if (typeof saved?.log === "string" && saved.log.startsWith("/") && ["claude", "codex"].includes(saved.kind)) {
+      if (typeof saved?.log === "string" && saved.log.startsWith("/") && ["claude", "codex", "pi"].includes(saved.kind)) {
         this.fixed(saved.log, saved.kind);
         return true;
       }
@@ -73,7 +73,7 @@ export class ChatReader {
     if (!path && starting(t)) path = "pending";
     // Codex opens its log with its first message: past those screens and idle, with no message yet, it has none.
     // Still an empty chat (the first message can be typed here), until it has worked a turn with no log to show.
-    if (!path && kind === "codex" && t?.state === "live" && !((t.turn ?? 0) > 1) && (t.status?.state ?? "idle") !== "blocked") path = "pending";
+    if (!path && (kind === "codex" || kind === "pi") && t?.state === "live" && !((t.turn ?? 0) > 1) && (t.status?.state ?? "idle") !== "blocked") path = "pending";
     if (path === "pending" || !path) {
       const was = this.state;
       this.reset();

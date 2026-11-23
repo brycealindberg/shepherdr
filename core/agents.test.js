@@ -352,3 +352,71 @@ test("a Quotio Codex chat resumes and forks on the proxy", () => {
     expect(out.at(-1)).toBe("abc");
   }
 });
+
+const piOut = `model\t\nquotio\t{"data":[{"id":"gemini-4-hydrogen-xhigh","owned_by":"antigravity"},{"id":"gemini-3.1-flash-image","owned_by":"antigravity"},{"id":"claude-opus-5-5","owned_by":"anthropic"}]}\n`;
+const PLAIN = "You are a helpful assistant. Help users inspect files, run commands, and modify code.";
+const piPick = (more = {}, old = { agent: "pi", argv: ["pi"] }) => argvFor({ agent: "pi", model: "quotio:gemini-4-hydrogen-xhigh", effort: "high", ...more }, old);
+const SESSION = "019e3a52-7c1d-7b2e-9a10-3f5d8c2b4e66";
+
+test("Pi's menu is Quotio's Antigravity text models as quotio rows, with pi's thinking levels and no permission modes", () => {
+  const m = menuFor("pi", parseDefaults("pi", piOut));
+  expect(m.name).toBe("Pi");
+  expect(m.models.map((x) => x.id)).toEqual(["quotio:gemini-4-hydrogen-xhigh"]);
+  expect(m.models[0]).toMatchObject({ name: "gemini-4-hydrogen-xhigh · Quotio", fast: false });
+  expect(m.models[0].efforts).toContain("minimal");
+  expect(m.perms).toEqual([]);
+  expect(menuFor("pi", parseDefaults("pi", "quotio\t\n")).models).toEqual([]);
+  expect(menuFor("pi", {}, "quotio:other").models.map((x) => x.id)).toEqual(["quotio:other"]);
+});
+
+test("a Pi pick starts pi with the quotio extension, its model and thinking, the plain prompt, and no key", () => {
+  const { argv, resume } = piPick();
+  expect(resume).toBe(false);
+  expect(argv).toEqual(["pi", "-ne", "-ns", "-nc", "-e", "~/.local/share/shepherdr/mods/pi/quotio.ts",
+    "--model", "quotio/gemini-4-hydrogen-xhigh:high", "--system-prompt", PLAIN]);
+  expect(argv.join(" ")).not.toMatch(/Bearer|api-key|cliproxyapi/i);
+  expect(piPick({ effort: null }).argv).toContain("quotio/gemini-4-hydrogen-xhigh");
+  expect(piPick({ model: "gemini-x" }).argv).toContain("quotio/gemini-x:high");
+});
+
+test("a Pi restart keeps the person's own flags once, and resumes its session only on pi", () => {
+  const first = piPick().argv;
+  const old = { agent: "pi", argv: [...first, "--offline"], session: SESSION };
+  const again = piPick({ model: "quotio:gemini-5", effort: "low" }, old);
+  expect(again.argv.filter((x) => x === "--offline").length).toBe(1);
+  for (const f of ["-ne", "-e", "--model", "--system-prompt"]) expect(again.argv.filter((x) => x === f).length).toBe(1);
+  expect(again.argv).toContain("quotio/gemini-5:low");
+  expect(again.argv.slice(-2)).toEqual(["--session", SESSION]);
+  expect(again.resume).toBe(true);
+  expect(again.base).not.toContain("--session");
+  const fromClaude = argvFor({ agent: "pi", model: "quotio:gemini-5" }, { agent: "claude", argv: ["claude", "--add-dir", "/x"], session: SESSION });
+  expect(fromClaude.resume).toBe(false);
+  expect(fromClaude.argv).not.toContain("--add-dir");
+  const toCodex = argvFor({ agent: "codex", model: "gpt-5" }, { agent: "pi", argv: first, session: SESSION });
+  expect(toCodex.argv.join(" ")).not.toMatch(/quotio\.ts|--system-prompt|-ne/);
+});
+
+test("a running pi shows its quotio row, level and window from its arguments, a log's model winning", () => {
+  const argv = piPick().argv;
+  const c = current("pi", argv, {}, {});
+  expect(c).toMatchObject({ agent: "pi", model: "gemini-4-hydrogen-xhigh", alias: "quotio:gemini-4-hydrogen-xhigh", effort: "high", window: 1000000 });
+  expect(rowFor("pi", c)).toBe("quotio:gemini-4-hydrogen-xhigh");
+  expect(line(c)).toBe("Pi · gemini-4-hydrogen-xhigh · Quotio · High");
+  expect(current("pi", ["pi", "--model", "quotio/gemini-3.8-flash-high"], {}, {}).effort ?? null).toBe(null);
+  expect(current("pi", argv, { model: "gemini-5", effort: "low", used: 500000 }, {})).toMatchObject({ model: "gemini-5", effort: "low", used: 500000 });
+  expect(AGall.liveAgent("pi", { foreground: { argv } }, {}, {})).toMatchObject({ kind: "pi", model: "gemini-4-hydrogen-xhigh", effort: "high", words: "gemini-4-hydrogen-xhigh · Quotio · High" });
+  expect(extraFlags("pi", [...argv, "--offline"])).toEqual(["--offline"]);
+});
+
+test("a pi that ended resumes its own session with its own flags, the session from its log's file name", () => {
+  expect(AGall.sessionOf("pi", `/h/.pi/agent/sessions/--w-p--/2026-11-23T20-03-19-368Z_${SESSION}.jsonl`)).toBe(SESSION);
+  const argv = piPick().argv;
+  expect(resumeArgv("pi", argv, SESSION)).toEqual([...argv, "--session", SESSION]);
+  expect(resumeArgv("pi", [...argv, "--session", "old"], SESSION)).toEqual([...argv, "--session", SESSION]);
+});
+
+test("pi is an agent a space can choose and a task can run", () => {
+  expect(AGall.choiceOf({ s: { agent: "pi", model: "quotio:x" } }, "s")).toMatchObject({ agent: "pi", model: "quotio:x" });
+  const t = { state: "live", labels: { "herdr.task": "r#1" }, status: { app: "pi" } };
+  expect(liveTaskAgent(t, [t])).toBe(t);
+});

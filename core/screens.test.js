@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readScreen, ScreenWatch, starting, pressKeys, SCREEN } from "./screens.js";
+import { cliOf, readScreen, ScreenWatch, starting, pressKeys, SCREEN } from "./screens.js";
 
 const TRUST = [
   "Do you trust the files in this folder?",
@@ -36,4 +36,11 @@ describe("a CLI's start screen, read the same by the window and the service", ()
     expect(sent).toEqual([["keys", "t1", "enter"]]);
     expect(store.get("t1")[0]).toMatchObject({ state: "answered", how: SCREEN.answered("Yes, proceed") });
   });
+});
+
+test("pi is a CLI: cliOf names it from its report or its program, and it is starting before its first turn", () => {
+  expect(cliOf({ status: { app: "pi" } })).toBe("pi");
+  expect(cliOf({ foreground: { name: "pi" } })).toBe("pi");
+  expect(cliOf({ foreground: { name: "bash" } })).toBe(null);
+  expect(starting({ state: "live", foreground: { name: "pi" } })).toBe(true);
 });

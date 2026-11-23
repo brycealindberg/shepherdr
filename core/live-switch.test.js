@@ -222,3 +222,8 @@ test("Codex's log saying ultrafast reads as Ultrafast", () => {
   expect(liveChanges({ fast: "ultrafast" }, { fast: true })).toEqual({ fast: true, wasFast: "ultrafast" });
   expect(liveChanges({ fast: "ultrafast" }, { fast: "ultrafast" })).toEqual({});
 });
+
+test("pi has no in-place switch: a model change restarts it", () => {
+  const from = { agent: "pi", model: "quotio:a", effort: "low", fast: false };
+  expect(liveOK(from, { ...from, model: "quotio:b" })).toBe(false);
+});

@@ -1,19 +1,20 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOG, Conversation, records, sendsOf } from "./chat-log.js";
+import { LOG, Conversation, records, resultText, sendsOf } from "./chat-log.js";
 
 // A Claude Code log as LOG reads it, fed to a Conversation.
-async function read(lines) {
+async function read(lines, kind = "claude") {
   const dir = mkdtempSync(join(tmpdir(), "chat-log-"));
   const f = join(dir, "log.jsonl");
   writeFileSync(f, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   const p = Bun.spawn(["sh", "-c", LOG, "log", "tail", f, "0"], { stdout: "pipe", stderr: "ignore" });
   const out = await new Response(p.stdout).text();
   rmSync(dir, { recursive: true });
-  const c = new Conversation("claude");
+  const c = new Conversation(kind);
   c.feed(records(out).records);
+  c.out = out;
   return c;
 }
 const said = (c) => c.items.filter((x) => x.kind === "agent").map((x) => x.text);
@@ -456,4 +457,82 @@ test("a Codex send's output says whether it got there", async () => {
   const c = new Conversation("codex");
   c.feed(records(out).records);
   expect(c.items.filter((x) => x.kind === "sent").map((x) => [x.to, x.state, x.why])).toEqual([["vm/root", "failed", "vm can't be reached"]]);
+});
+
+const PI_AT = "2026-11-23T20:03:19.368Z";
+const pi = (type, more) => ({ type, id: `i${n++}`, parentId: null, timestamp: PI_AT, ...more });
+const piMsg = (message) => pi("message", { message });
+const piUser = (words) => piMsg({ role: "user", content: [{ type: "text", text: words }], timestamp: 1 });
+const piReply = (content, more = {}) => piMsg({ role: "assistant", content, api: "openai-completions", provider: "quotio", model: "gemini-4-hydrogen-xhigh",
+  usage: { input: 900, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 1000, cost: { total: 0 } }, stopReason: "stop", timestamp: 2, ...more });
+const piCall = { type: "toolCall", id: "call_1|abc", name: "bash", arguments: { command: "echo shep-42" } };
+const piResult = (words, more = {}) => piMsg({ role: "toolResult", toolCallId: "call_1|abc", toolName: "bash", content: [{ type: "text", text: words }], isError: false, timestamp: 3, ...more });
+const piHead = [pi("session", { version: 3, cwd: "/w/p" }), pi("model_change", { provider: "quotio", modelId: "gemini-4-hydrogen-xhigh" }), pi("thinking_level_change", { thinkingLevel: "high" })];
+
+test("pi: what the person typed and what the agent answered are the chat's two sides", async () => {
+  const c = await read([...piHead, piUser("echo shep-42"), piReply([{ type: "thinking", thinking: "hm", thinkingSignature: "x" }, { type: "text", text: "shep-42" }])], "pi");
+  expect(c.items.map((x) => [x.kind, x.text])).toEqual([["user", "echo shep-42"], ["agent", "shep-42"]]);
+  expect(c.items[1].at).toBe(Date.parse(PI_AT));
+});
+
+test("pi: a command is a Ran row, working until its result comes, whose output stays in the file", async () => {
+  const big = "x".repeat(300000);
+  const open = await read([...piHead, piUser("go"), piReply([{ type: "thinking", thinking: "", thinkingSignature: "x" }, piCall], { stopReason: "toolUse" })], "pi");
+  expect(open.items.at(-1)).toMatchObject({ kind: "tools", steps: [{ kind: "run", line: "Ran echo shep-42" }] });
+  expect(open.doing).toBe("Running echo shep-42");
+  const done = await read([...piHead, piUser("go"), piReply([piCall], { stopReason: "toolUse" }), piResult(big), piReply([{ type: "text", text: "done" }])], "pi");
+  expect(done.doing).toBe(null);
+  expect(done.items.find((x) => x.kind === "tools").steps[0].out).toBeGreaterThan(0);
+  expect(done.out).not.toContain("xxxxxxxxxx");
+  expect(done.items.at(-1)).toMatchObject({ kind: "agent", text: "done" });
+});
+
+test("pi: thinking alone shows as working, not as a message", async () => {
+  const c = await read([...piHead, piUser("go"), piReply([{ type: "thinking", thinking: "private", thinkingSignature: "x" }], { stopReason: "toolUse" })], "pi");
+  expect(said(c)).toEqual([]);
+  expect(c.doing).toBe("Thinking");
+});
+
+test("pi: the model, its thinking level and the context used come from its lines", async () => {
+  const c = await read([...piHead, piUser("go"), piReply([{ type: "text", text: "ok" }])], "pi");
+  expect(c.meta).toMatchObject({ model: "gemini-4-hydrogen-xhigh", effort: "high", used: 1000 });
+  const later = await read([...piHead, pi("model_change", { provider: "quotio", modelId: "gemini-5" }), pi("thinking_level_change", { thinkingLevel: "low" })], "pi");
+  expect(later.meta).toMatchObject({ model: "gemini-5", effort: "low" });
+});
+
+test("pi: a failed send's result says it was not delivered", async () => {
+  const send = { ...piCall, arguments: { command: "hc send t3 'hello there'" } };
+  const c = await read([...piHead, piUser("tell t3"), piReply([send], { stopReason: "toolUse" }), piResult("Error: no such terminal t3", { isError: true })], "pi");
+  expect(c.items.find((x) => x.kind === "sent")).toMatchObject({ to: "t3", state: "failed" });
+});
+
+test("pi: a result's first lines are read from its line", () => {
+  const line = JSON.stringify(piResult("a\nb"));
+  expect(resultText(line, "call_1|abc")).toBe("a\nb");
+});
+
+test("pi lines are not mistaken for another CLI's, and another's are not pi's", async () => {
+  const c = await read([person, reply("m1", [text("hi")])], "pi");
+  expect(c.items).toEqual([]);
+});
+
+const piFind = async (pid, home) => (await new Response(Bun.spawn(["env", `HOME=${home}`, "sh", "-c", FIND, "chat", "pi", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout).text()).trim();
+test("FIND: a pi process's newest session in its folder's directory, or the one its --session names (Linux)", async () => {
+  if (!require("node:fs").existsSync("/proc/self/fd")) return;
+  const home = mkdtempSync(join(tmpdir(), "chat-pi-"));
+  const cwd = require("node:fs").realpathSync(mkdtempSync(join(tmpdir(), "chat-pi-cwd-")));
+  const dir = join(home, ".pi/agent/sessions", `--${cwd.slice(1).replace(/[/:]/g, "-")}--`);
+  mkdirSync(dir, { recursive: true });
+  const old = join(dir, "2026-11-23T10-00-00-000Z_00000000-0000-7000-8000-00000000000a.jsonl");
+  const fresh = join(dir, "2026-11-23T11-00-00-000Z_00000000-0000-7000-8000-00000000000b.jsonl");
+  writeFileSync(old, "{}\n");
+  writeFileSync(fresh, "{}\n");
+  utimesSync(old, 1000, 1000);
+  const run = (...args) => Bun.spawn(["sh", "-c", "sleep 30", "pi", ...args], { cwd, stdout: "ignore" });
+  const plain = run(), resumed = run("--session", "00000000-0000-7000-8000-00000000000a");
+  try {
+    expect(await piFind(plain.pid, home)).toBe(fresh);
+    expect(await piFind(resumed.pid, home)).toBe(old);
+    expect(await piFind(plain.pid, mkdtempSync(join(tmpdir(), "chat-pi-"))) ).toBe("");
+  } finally { plain.kill(); resumed.kill(); }
 });

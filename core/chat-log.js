@@ -32,6 +32,12 @@ for p in "$pid" $(kids "$pid"); do
     [ -n "$id" ] || continue
     for f in "$c"/projects/*/"$id".jsonl; do [ -f "$f" ] && { echo "$f"; exit 0; }; done
     echo "pending"; exit 0
+  elif [ "$kind" = pi ]; then
+    w=$(readlink "/proc/$p/cwd" 2>/dev/null || lsof -a -d cwd -p "$p" -Fn 2>/dev/null | sed -n 's/^n//p')
+    [ -n "$w" ] || continue
+    s=$(ps -ww -o args= -p "$p" 2>/dev/null | tr ' ' '\n' | sed -n '/^--session$/{n;p;q;}')
+    f=$(ls -t "$HOME/.pi/agent/sessions/--$(printf %s "\${w#/}" | tr '/:' '--')--"/*"$s"*.jsonl 2>/dev/null | head -n 1)
+    [ -n "$f" ] && { echo "$f"; exit 0; }
   else
     if [ -d "/proc/$p/fd" ]; then
       f=$(for d in /proc/$p/fd/*; do readlink "$d"; done 2>/dev/null | grep '/rollout-.*\\.jsonl$' | main)
@@ -80,10 +86,11 @@ BEGIN { pos = base; first = base; msgs = 0 }
     if (length(line) <= 262144) print off "\tJ\t" line
     next
   }
-  if ((claude && index(line, "\"tool_result\"")) || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\"")))) {
+  pi = index(head, "{\"type\":\"message\"") == 1 && index(head, "\"role\":\"toolResult\"")
+  if ((claude && index(line, "\"tool_result\"")) || pi || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\"")))) {
     if (count) next
     ids = ""; t = line
-    while (match(t, /"(tool_use_id|call_id)":"[^"]*"/)) { m = substr(t, RSTART, RLENGTH); sub(/^"[a-z_]*":"/, "", m); sub(/"$/, "", m); ids = ids " " m; t = substr(t, RSTART + RLENGTH) }
+    while (match(t, /"(tool_use_id|call_id|toolCallId)":"[^"]*"/)) { m = substr(t, RSTART, RLENGTH); sub(/^"[A-Za-z_]*":"/, "", m); sub(/"$/, "", m); ids = ids " " m; t = substr(t, RSTART + RLENGTH) }
     # A helper (or job) launched to run on its own: its result came at once, it is not done yet.
     if (index(line, "Async agent launched") || index(line, "running in background")) ids = ids " ASYNC"
     # A shell or watcher left running in the background (or moved there mid-run): its task id.
@@ -93,7 +100,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
     # An answer to a question, or words that declined a request: read whole (answers()). Else what a send to
     # another agent came back with (delivered, held, not delivered): read whole too (delivery()).
     if (claude && length(line) <= 262144 && ((index(line, "\"answers\":{") && index(line, "\"questions\":[")) || index(line, "wrote in the chat instead: "))) print off "\tJ\t" line
-    else if (length(line) <= 65536 && (index(line, "elivered") || index(line, ": sent to ") || index(line, "\"is_error\":true") || (codex && match(line, /[Ee]xit[_ ]code[^0-9]?[^0-9]?[^0-9]?[^0-9]?[1-9]/)))) print off "\tJ\t" line
+    else if (length(line) <= 65536 && (index(line, "elivered") || index(line, ": sent to ") || index(line, "\"is_error\":true") || (pi && index(line, "\"isError\":true")) || (codex && match(line, /[Ee]xit[_ ]code[^0-9]?[^0-9]?[^0-9]?[^0-9]?[1-9]/)))) print off "\tJ\t" line
     next
   }
   # The queue of messages typed while Claude Code works: what goes in (the words of the person)
@@ -114,6 +121,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
   } else if (index(head, "\"type\":\"event_msg\"")) {
     if (index(head, "\"task_complete\"") || index(head, "\"turn_aborted\"") || index(head, "\"token_count\"") || index(head, "\"thread_settings_applied\"")) keep = 1
   } else if (index(head, "\"type\":\"turn_context\"")) {
+    keep = 1
+  } else if (index(head, "{\"type\":\"message\"") == 1 || index(head, "{\"type\":\"model_change\"") == 1 || index(head, "{\"type\":\"thinking_level_change\"") == 1) {
     keep = 1
   }
   if (!keep) next
@@ -952,7 +961,7 @@ export class Conversation {
       }
       const l = parse(r.data);
       if (!l || typeof l !== "object") continue;
-      if (this.kind === "codex") this.codex(l, r.off); else this.claude(l, r.off);
+      if (this.kind === "codex") this.codex(l, r.off); else if (this.kind === "pi") this.pi(l, r.off); else this.claude(l, r.off);
     }
   }
 
@@ -1048,6 +1057,35 @@ export class Conversation {
           }
         }
       }
+    }
+  }
+
+  pi(l, off) {
+    const at = time(l.timestamp);
+    if (l.type === "model_change") this.meta = { ...this.meta, model: l.modelId ?? this.meta.model, at };
+    else if (l.type === "thinking_level_change") this.meta = { ...this.meta, effort: l.thinkingLevel ?? this.meta.effort, at };
+    const m = l.type === "message" ? l.message : null;
+    if (!m) return;
+    const blocks = Array.isArray(m.content) ? m.content : [];
+    if (m.role === "user") {
+      const u = cleanUser(blocks.filter((b) => b?.type === "text").map((b) => b.text).join("\n\n"));
+      if (u) this.user(`u${off}`, { ...u, at });
+    } else if (m.role === "assistant") {
+      if (m.model) this.meta = { ...this.meta, model: m.model, used: m.usage?.totalTokens || this.meta.used, at };
+      blocks.forEach((b, i) => {
+        if (b?.type === "thinking") { if (!this.open.size) this.doing = "Thinking"; return; }
+        if (b?.type === "text") {
+          const said = this.agentText(b.text ?? "");
+          if (said) this.push({ kind: "agent", id: i ? `a${off}:${i}` : `a${off}`, text: said, at, ...this.takeSuggest() });
+        } else if (b?.type === "toolCall") {
+          const a = b.arguments ?? {};
+          const st = claudeStep({ bash: "Bash", read: "Read", edit: "Edit", write: "Write", grep: "Grep", find: "Glob" }[b.name] ?? String(b.name ?? ""), { ...a, file_path: a.path });
+          this.step(String(b.id), off, st);
+          if (b.name === "bash") this.sent(String(a.command ?? ""), off, at, String(b.id));
+        }
+      });
+    } else if (m.role === "toolResult") {
+      this.delivery(String(m.toolCallId), blocks.map((b) => b?.text ?? "").join("\n"), m.isError === true);
     }
   }
 
@@ -1147,6 +1185,7 @@ export function resultText(line, id) {
       const v = b?.content;
       text = typeof v === "string" ? v : Array.isArray(v) ? v.map((x) => x?.text ?? "").join("\n") : null;
     }
+    if (l.message?.role === "toolResult" && Array.isArray(c)) text = c.map((x) => x?.text ?? "").join("\n");
     const o = l.payload?.output;
     if (text === null && o !== undefined) text = typeof o === "string" ? o : String(o?.output ?? o?.content ?? JSON.stringify(o));
   } else {

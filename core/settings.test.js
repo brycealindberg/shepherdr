@@ -115,3 +115,13 @@ test("a fresh chat starts on the choice when its agent is on offer there, else o
   // Codex isn't installed there: the defaults, as the start falls back to the template's own
   expect(S.freshSel(sol, S.choicesFrom({ claude: {} }, { claude: true, codex: false })).agent).toBe("claude");
 });
+
+test("pi has a model menu only where it is installed, and no permission default", () => {
+  const dflts = { claude: { model: "opus", per: {} }, codex: {}, pi: { quotio: ["gemini-4"] } };
+  expect(S.choicesFrom(dflts).menus.pi).toBeUndefined();
+  const c = S.choicesFrom(dflts, { claude: true, codex: true, pi: true });
+  expect(c.menus.pi.models.map((m) => m.id)).toEqual(["quotio:gemini-4"]);
+  expect(c.permDefault.pi).toBe(null);
+  expect(c.defaults.agent).toBe("claude");
+  expect(S.choicesFrom(dflts, { pi: true }).defaults).toMatchObject({ agent: "pi", model: "quotio:gemini-4" });
+});

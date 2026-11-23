@@ -2,7 +2,7 @@
 // rules both the window's model menu (lib/agent.js, mods/chat-models) and the web app's use. Reading an agent's own
 // settings and restarting it run where each side runs commands (lib/agent.js, service/agents.ts).
 // Shared core: the source is core/agents.js; bin/sync-shared copies it into the mods in lib/COPIES.
-export const NAMES = { claude: "Claude Code", codex: "Codex" };
+export const NAMES = { claude: "Claude Code", codex: "Codex", pi: "Pi" };
 
 // Claude Code's current models, as its /model menu offers them. `id` is what --model gets;
 // `match` the names a running agent may report for it.
@@ -29,12 +29,16 @@ const QUOTIO_CODEX_KEYS = /^(model_provider|model_providers\.quotio|instructions
 const quotioCodex = (m) => ["-m", m, "-c", "model_provider=quotio",
   "-c", `model_providers.quotio={name="quotio",base_url="${QUOTIO_URL}/v1",wire_api="responses",auth={command="sh",args=["-c",${JSON.stringify(QUOTIO_KEY)}]}}`,
   "-c", `instructions="${QUOTIO_PROMPT}"`, "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", "--disable", "hooks", "--disable", "plugins"];
+// WARNING: pi runs from the quotio.ts extension shepherdr installs, and its thinking levels are its own.
+const PI_MOD = "~/.local/share/shepherdr/mods/pi/quotio.ts";
+const PI_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 // Permission modes as each CLI has them (Claude: --permission-mode, or
 // --dangerously-skip-permissions for full access; Codex: its sandbox and approvals).
 const PERMS = {
   claude: [{ id: "manual", label: "Ask" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" },
     { id: "plan", label: "Plan" }, { id: "bypassPermissions", label: "Full access" }],
   codex: [{ id: "read-only", label: "Read only" }, { id: "auto", label: "Auto" }, { id: "full", label: "Full access" }],
+  pi: [],
 };
 // A permission mode carried to the other agent when the agent is switched: its nearest mode there (auto stays auto,
 // full access stays full access, Claude's accept edits is Codex's auto, plan and read only swap), else that agent's
@@ -84,7 +88,7 @@ export const DEFAULTS = `
 if [ "$1" = claude ]; then
   f="$HOME/.claude/settings.json"
   command -v jq >/dev/null && [ -f "$f" ] && jq -r '"model\\t\\(.model // "")", "effort\\t\\(.effortLevel // "")", "fast\\t\\(if .fastMode == true then "on" else "" end)", "per\\t\\(.modelSettings // {} | with_entries(.value |= (.effortLevel // null)) | tojson)", "mode\\t\\(.permissions.defaultMode // "")"' "$f" 2>/dev/null
-else
+elif [ "$1" = codex ]; then
   f="$HOME/.codex/config.toml"
   for k in model model_reasoning_effort service_tier sandbox_mode approval_policy; do
     printf '%s\\t%s\\n' "$k" "$(sed -n "s/^$k[[:space:]]*=[[:space:]]*\\"\\{0,1\\}\\([^\\"]*\\)\\"\\{0,1\\}.*/\\1/p" "$f" 2>/dev/null | head -1)"
@@ -119,8 +123,9 @@ export function parseDefaults(kind, stdout) {
     } catch {}
   }
   let quotio = [];
-  // WARNING: Antigravity answers Claude Code's own system prompt with a 429 "Resource has been exhausted", so its models run on Codex only.
-  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).filter((m) => kind !== "claude" || m.owned_by !== "antigravity").map((m) => m.id).filter((id) => id && !/image/.test(id)); } catch {}
+  // WARNING: Antigravity answers Claude Code's own system prompt with a 429 "Resource has been exhausted", so its models run on Codex and pi only, and pi runs nothing else.
+  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).filter((m) => kind === "pi" ? m.owned_by === "antigravity" : kind !== "claude" || m.owned_by !== "antigravity").map((m) => m.id).filter((id) => id && !/image/.test(id)); } catch {}
+  if (kind === "pi") return { model: null, effort: null, quotio };
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null, quotio }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
@@ -146,6 +151,12 @@ export function current(kind, argv, meta, dflt) {
     const perm = argv.includes("--dangerously-skip-permissions") ? "bypassPermissions" : flag(argv, "--permission-mode") ?? dflt.mode ?? "manual";
     return { agent: "claude", model: meta.model ?? alias, alias, ...(proxied ? { label: `${proxied} · Quotio` } : {}), effort: meta.effort ?? flag(argv, "--effort") ?? per ?? dflt.effort,
       fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (proxied ? quotioWindow(proxied)[1] : big ? 1000000 : 200000) };
+  }
+  if (kind === "pi") {
+    const [, id, thinking] = /^(?:quotio\/)?(.+?)(?::(off|minimal|low|medium|high|xhigh|max))?$/.exec(flag(argv, "--model") ?? "") ?? [];
+    const model = meta.model ?? id ?? null;
+    return { agent: "pi", model, ...(model ? { alias: `quotio:${model}`, label: `${model} · Quotio` } : {}), effort: meta.effort ?? thinking ?? null, fast: false,
+      used: meta.used ?? null, window: meta.window ?? (model ? quotioWindow(model)[1] : null) };
   }
   const o = overrides(argv);
   const tier = o.service_tier;
@@ -184,7 +195,7 @@ export const CHOICE_KEY = "coordinator.choice";
 // A space's choice as { agent, model, effort, fast, perm }, or null when none (or none that names an agent) is kept.
 export function choiceOf(all, space) {
   const c = space && all && typeof all === "object" ? all[space] : null;
-  if (!c || (c.agent !== "claude" && c.agent !== "codex")) return null;
+  if (!c || (c.agent !== "claude" && c.agent !== "codex" && c.agent !== "pi")) return null;
   return { agent: c.agent, model: c.model ?? null, effort: c.effort ?? null, fast: c.fast === "ultrafast" ? "ultrafast" : Boolean(c.fast), perm: c.perm ?? null };
 }
 export const sameChoice = (a, b) => JSON.stringify(choiceOf({ x: a }, "x")) === JSON.stringify(choiceOf({ x: b }, "x"));
@@ -226,6 +237,11 @@ export function menuFor(agent, dflt, current = null) {
     if (current && !models.some((m) => m.id === current)) models.unshift({ id: current, name: modelName(current), efforts: CLAUDE_EFFORTS, defaultEffort: dflt?.effort ?? null, fast: false });
     return { name: NAMES.claude, perms: PERMS.claude, models };
   }
+  if (agent === "pi") {
+    const models = (dflt?.quotio ?? []).map((id) => ({ id: `quotio:${id}`, name: `${id} · Quotio`, efforts: PI_EFFORTS, defaultEffort: null, fast: false }));
+    if (current && !models.some((m) => m.id === current)) models.unshift({ id: current, name: current, efforts: PI_EFFORTS, defaultEffort: null, fast: false });
+    return { name: NAMES.pi, perms: PERMS.pi, models };
+  }
   const all = (dflt?.models ?? []).map((m) => ({ id: m.id, name: m.label, efforts: m.efforts?.length ? m.efforts : ["low", "medium", "high", "xhigh"],
     defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast, ...(m.ultrafast ? { ultrafast: true } : {}) }));
   for (const id of dflt?.quotio ?? []) all.push({ id: `quotio:${id}`, name: `${id} · Quotio`, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false });
@@ -235,7 +251,7 @@ export function menuFor(agent, dflt, current = null) {
 
 // The levels a model typed by id gets: its agent's usual ones.
 export function typedModel(agent, id) {
-  return { id, name: agent === "claude" ? modelName(id) : id, efforts: agent === "claude" ? CLAUDE_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
+  return { id, name: agent === "claude" ? modelName(id) : id, efforts: agent === "claude" ? CLAUDE_EFFORTS : agent === "pi" ? PI_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
 }
 
 // The person's picks in the model menus (the window's and the web's alike), in PICKS_FILE under the
@@ -336,13 +352,16 @@ const CLAUDE_BARE = new Set(["--continue", "-c", "--fork-session", "--dangerousl
 const CLAUDE_VALUE = new Set(["--add-dir", "--mcp-config", "--append-system-prompt", "--system-prompt",
   "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--agent", "--agents", "--plugin-dir",
   "--fallback-model", "--output-format", "--input-format", "--name", "--setting-sources", "--betas", "--debug-file"]);
+const PI_BARE = new Set(["-ne", "-ns", "-nc", "--continue", "-c"]);
+const PI_DROP = new Set(["-e", "--model", "--system-prompt", "--thinking", "--session"]);
+const PI_VALUE = new Set([...PI_DROP, "--provider", "--name", "-n", "--session-dir", "--models", "--fork", "--session-id"]);
 const CODEX_VALUE = new Set(["-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
   "-C", "--cd", "--add-dir", "-i", "--image", "--enable", "--disable", "--local-provider", "--oss"]);
 
 // Where the agent's own word (claude, codex) is in argv: a terminal's argv starts with what launched it (nice,
 // sh -c, env, the person's `bash -ic`), whose words are no agent flags (#1001: its -ic was Codex's `-i c`, an image).
 function agentAt(argv) {
-  return argv.findIndex((a, i) => (i === 0 || !String(a).startsWith("-")) && /^(claude|codex)$/.test(String(a).split("/").pop()));
+  return argv.findIndex((a, i) => (i === 0 || !String(a).startsWith("-")) && /^(claude|codex|pi)$/.test(String(a).split("/").pop()));
 }
 
 // The old agent's flags worth keeping (permissions, folders, ...), without what is chosen again
@@ -358,6 +377,10 @@ function kept(kind, argv) {
       if (CLAUDE_DROP.has(a)) { if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++; continue; }
       if ([...CLAUDE_DROP].some((f) => a.startsWith(f + "="))) continue;
       if (CLAUDE_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
+      if (a.startsWith("-")) out.push(a);
+    } else if (kind === "pi") {
+      if (PI_BARE.has(a)) continue;
+      if (PI_DROP.has(a)) { i++; continue; }
       if (a.startsWith("-")) out.push(a);
     } else {
       if (i === 0 && (a === "resume" || a === "fork")) { if (rest[1] && !rest[1].startsWith("-")) i++; continue; }
@@ -380,7 +403,7 @@ export function extraFlags(kind, argv) {
   argv = argv ?? [];
   const at = agentAt(argv);
   if (at < 0) return [];
-  const value = kind === "claude" ? new Set([...CLAUDE_VALUE, ...CLAUDE_DROP]) : CODEX_VALUE;
+  const value = kind === "claude" ? new Set([...CLAUDE_VALUE, ...CLAUDE_DROP]) : kind === "pi" ? PI_VALUE : CODEX_VALUE;
   return argv.slice(at + 1).map(String).filter((a, i, rest) => {
     if (!a.startsWith("--") || a === "--" || (i > 0 && value.has(rest[i - 1]))) return false;
     const name = a.split("=")[0];
@@ -412,6 +435,10 @@ function stripSession(kind, argv) {
       if (a === "--continue" || a === "-c") { resumed = true; continue; }
       if (a === "--fork-session") continue;
       if (CLAUDE_VALUE.has(a) || ["--model", "--effort", "--settings", "--permission-mode"].includes(a)) { out.push(a, rest[++i]); continue; }
+    } else if (kind === "pi") {
+      if (a === "--session") { resumed = true; i++; continue; }
+      if (a === "--continue" || a === "-c") { resumed = true; continue; }
+      if (PI_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
     } else {
       if (i === 0 && (a === "resume" || a === "fork")) { resumed = true; continue; }
       if (a === "--last") continue;
@@ -442,6 +469,14 @@ export function argvFor(pick, old) {
     if (same && old.session) return { argv: [...a, "--resume", old.session], resume: true, base: a };
     return { argv: a, resume: false, base: a };
   }
+  if (pick.agent === "pi") {
+    const id = (pick.model ?? "").replace(/^quotio:/, "");
+    const a = ["pi", "-ne", "-ns", "-nc", "-e", PI_MOD, ...flags];
+    if (id) a.push("--model", `quotio/${id}${pick.effort ? ":" + pick.effort : ""}`);
+    a.push("--system-prompt", QUOTIO_PROMPT);
+    if (same && old.session) return { argv: [...a, "--session", old.session], resume: true, base: a };
+    return { argv: a, resume: false, base: a };
+  }
   // Codex runs its commands outside hc without --no-daemon (as herdr-task and restart.sh add).
   const a = [...flags, "--no-daemon"];
   const q = /^quotio:(.+)$/.exec(pick.model ?? "")?.[1];
@@ -467,6 +502,7 @@ export function sessionOf(kind, path) {
 // and speed, resuming `session`.
 export function resumeArgv(kind, argv, session) {
   const out = stripSession(kind, argv)?.out ?? [kind];
+  if (kind === "pi") return [...out, "--session", session];
   return kind === "claude" ? [...out, "--resume", session] : [out[0], "resume", ...out.slice(1), session];
 }
 
@@ -488,7 +524,7 @@ export function forkArgv(kind, argv, session) {
 // #1050: a fork of a task's conversation while the task's agent runs works in the same folder, so two agents would
 // edit one worktree. The task's live agent (a terminal record from `all`, reviewers and helpers aside) when `t` is a
 // task's terminal, else null: the fork then asks first (FORK_LIVE).
-const AGENT_APPS = new Set(["claude-code", "claude", "codex"]);
+const AGENT_APPS = new Set(["claude-code", "claude", "codex", "pi"]);
 export function liveTaskAgent(t, all) {
   const task = t?.labels?.["herdr.task"];
   if (!task) return null;
