@@ -8,6 +8,7 @@
 //                                  so there is no other switch for it
 // Serve from (service/host.ts): one machine serves the web app and holds the shared data; on the others the service
 // reads and writes it there, keeps their settings in step (service/sync.ts) and doesn't share /shepherdr.
+import "./log.ts";
 import { useSession } from "./session.ts";
 import { spawn } from "./spawn.ts";
 useSession();
