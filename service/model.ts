@@ -13,7 +13,7 @@ import { carryOver, IMPORTED } from "./carry-over.ts";
 import { HOME } from "./paths.ts";
 import * as T from "../core/tasks.js";
 import { FIND } from "../core/chat-log.js";
-import { isHelper, subagentsOf } from "../core/chat-view.js";
+import { isHelper, subagentsOf, waitingOn } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, ownReport, secondLine, leftOf, queueReason, machineOf, inSpace } = T as any;
 import * as S from "../core/spaces.js";
@@ -291,9 +291,10 @@ export class Model {
       const mine = live.filter((a) => a.role !== "reviewer" && a.role !== "helper");
       const worker = mine.find((a) => a.status === "blocked")?.address ?? mine[0]?.address ?? null;
       const last = task.agents?.[task.agents.length - 1];
+      const subagents = worker ? subagentsOf(terminals as any[], worker) : [];
       return {
         key: taskKey(list, task), ref: refOf(list, task), title: task.title, section: p.section, needs: p.needs,
-        sub: secondLine(p, w, p.section === "queued" ? queueReason(list, task) : null), left: leftOf(p, w), pct: w?.done ?? null,
+        sub: (!p.why && waitingOn(p.section, subagents)) || secondLine(p, w, p.section === "queued" ? queueReason(list, task) : null), left: leftOf(p, w), pct: w?.done ?? null,
         // what its agent last said (core reportOf): working, and frozen while it
         // needs the person
         said: w?.text ? { text: w.text, done: w.done ?? null, left: w.left ?? null, paused: !!w.paused } : null,
@@ -310,7 +311,7 @@ export class Model {
         worktree: task.worktree ?? list.folder, base: task.base ?? null, start: task.start ?? null, branch: task.branch ?? null,
         lastLog: !worker && last?.log ? { path: last.log, kind: last.agent ?? "claude" } : null,
         // its worker's own helper agents (SHEP-54), for the task's detail
-        subagents: worker ? subagentsOf(terminals as any[], worker) : [],
+        subagents,
         // what finds its artifacts (core/task-artifacts.js): its proof, its agents' terminals while they ran, their logs
         proof: task.proof?.id ?? null,
         agents: (Array.isArray(task.agents) ? task.agents : []).map((a: any) => ({ address: a.address ?? null, at: a.at ?? 0, ended: a.ended ?? null })),

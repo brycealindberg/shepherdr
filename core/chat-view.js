@@ -485,6 +485,12 @@ export function subagentsOf(terms, addr, now = Date.now()) {
   return out.sort((a, b) => a.at - b.at);
 }
 
+// WARNING: a working agent's turn does not advance while its children run; this line is what says it is not stuck.
+export function waitingOn(section, subs) {
+  const at = section === "working" ? subs.filter((s) => s.status === "working") : [];
+  return at.length ? `Waiting on ${at[0].title}${at.length > 1 ? ` and ${at.length - 1} more` : ""}` : null;
+}
+
 // Media an agent puts in its message (SHEP-142): a Markdown picture ![alt](path) or a link [words](path) to a local
 // image or video file (an absolute path, ~/…, file://… or one relative to its folder). The chat shows each one right
 // there, under the words (pictures as thumbnails, a video with a player), and keeps the rest of the words as they are:

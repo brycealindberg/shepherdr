@@ -189,7 +189,7 @@ describe("agent to agent as a group chat (SHEP-27)", () => {
 });
 
 // SHEP-54: an agent's own helper agents in herdr, over its chat
-import { subagentsOf, subagentTitle, isHelper } from "./chat-view.js";
+import { subagentsOf, subagentTitle, isHelper, waitingOn } from "./chat-view.js";
 test("subagentsOf: its own hc children labelled reviewer or helper, never workers", () => {
   const now = 10_000_000;
   const terms = [
@@ -212,6 +212,15 @@ test("subagentsOf: its own hc children labelled reviewer or helper, never worker
   expect(subagentsOf(terms, "t0", now)).toEqual([]);
   expect(isHelper({ labels: { "herdr.role": "reviewer" } })).toBe(false); // no parent: an old herdr-task reviewer
   expect(subagentTitle({ role: "reviewer", cli: null })).toBe("Reviewer");
+});
+
+test("waitingOn: names the working children of a working parent, else nothing", () => {
+  const subs = [{ title: "Reviewer · Codex", status: "working" }, { title: "Helper · Claude Code", status: "needs" }, { title: "Reviewer", status: "working" }, { title: "Old", status: "done" }];
+  expect(waitingOn("working", subs)).toBe("Waiting on Reviewer · Codex and 1 more");
+  expect(waitingOn("working", [subs[0], subs[1], subs[3]])).toBe("Waiting on Reviewer · Codex");
+  expect(waitingOn("working", [subs[1], subs[3]])).toBeNull();
+  expect(waitingOn("needs", subs)).toBeNull();
+  expect(waitingOn("working", [])).toBeNull();
 });
 
 // SHEP-69 (#591, #592, #589): the person's words as typed, and the session's first message found again.
