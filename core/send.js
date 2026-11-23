@@ -237,6 +237,15 @@ export async function settleBox(io, addr, body, opts = SETTLE) {
   return box === null || !holds(box, body);
 }
 
+// WARNING: hc send pastes after any text left in Claude Code's box and glues the two; Ctrl+U clears it (Ctrl+Y undoes).
+async function clearBox(io, addr) {
+  for (let i = 0; i < 3; i++) {
+    const rest = String((await boxOf(io, addr)) ?? "").replace(/^❯\s?/, "").trim();
+    if (!rest || /^press up to edit queued messages$/i.test(rest)) return;
+    await io.hc(["keys", addr, "ctrl+u"]).catch(() => null);
+  }
+}
+
 // hc send for one CLI. Claude Code reads the pictures a pasted message names before it takes
 // Enter: an Enter that comes meanwhile is lost, and the message sits in its box ("[Image #1]
 // words") until the next one pushes it in (hc send says so only ~5 s later). While hc send is on
@@ -255,6 +264,7 @@ export async function sendTyped(io, addr, kind, body, opts = SETTLE, again = fal
     // the box let it go since (Claude Code took it in late): typed again it would go twice
     if (box !== undefined && !holds(box, body)) return { code: 0, stdout: "{}", stderr: "" };
   }
+  await clearBox(io, addr);
   const going = io.hc(["send", addr, body]);
   let back = false, last = null;
   const sent = going.finally(() => { back = true; });

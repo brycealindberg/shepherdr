@@ -375,3 +375,27 @@ test("inFront: a plain shell, a shell running the agent, the agent, another prog
   expect(inFront({ state: "live" })).toBeNull();
   expect(NOT_TYPED.shell).toContain("nothing was typed");
 });
+
+test("old text left in Claude Code's box is cleared before a message is typed, so the two never glue", async () => {
+  const boxes = ["❯ B yes only things not needed 100% double checkhows it going", "❯ ", "❯ "];
+  let n = 0;
+  const calls = [];
+  const io = {
+    sleep: async () => {},
+    status: () => "idle",
+    hc: async (args) => {
+      calls.push(args[0] === "send" ? "send" : args.join(" "));
+      if (args[0] === "read") return { code: 0, stdout: `● ok\n────\n${boxes[Math.min(n++, boxes.length - 1)]}\n────` };
+      return { code: 0, stdout: args[0] === "send" ? '{"started":true}' : "", stderr: "" };
+    },
+  };
+  expect((await sendBody(io, "t1", "claude", "is it working")).code).toBe(0);
+  expect(calls.indexOf("keys t1 ctrl+u")).toBeGreaterThan(-1);
+  expect(calls.indexOf("keys t1 ctrl+u")).toBeLessThan(calls.indexOf("send"));
+  // an empty box, or its queued placeholder, is never cleared
+  for (const box of ["❯ ", "❯ Press up to edit queued messages"]) {
+    boxes.splice(0, 3, box, box, box); n = 0; calls.length = 0;
+    await sendBody(io, "t1", "claude", "is it working");
+    expect(calls).not.toContain("keys t1 ctrl+u");
+  }
+});
