@@ -301,7 +301,7 @@ class Install(unittest.TestCase):
                      "mods/coordinator/restart.sh", "web/dist/artifact-viewer.html", "keys.json", "layouts/shepherdr.json"):
             self.assertNotIn(f"{SHARE}/{gone}", rec["files"], gone)
         self.assertFalse([f for f in rec["files"] if f.startswith(f"{SHARE}/mods/") and "/bin/" not in f
-                          and f != f"{SHARE}/mods/artifacts/ARTIFACTS.md"], "of mods/, only the helpers' bin folders and the artifact guide")
+                          and f not in (f"{SHARE}/mods/artifacts/ARTIFACTS.md", f"{SHARE}/mods/pi/quotio.ts")], "of mods/, only the helpers' bin folders, the artifact guide and pi's extension")
         # every relative import the installed service runs resolves inside what was installed (bun can start it)
         for d, _, files in os.walk(share):
             if "/web/dist" in d or "/mods/" in d or "/herdr/" in d:
@@ -329,6 +329,7 @@ class Install(unittest.TestCase):
         p = subprocess.run([sys.executable, os.path.join(share, "mods/artifacts/bin/herdr-artifact"), "guide"], capture_output=True, text=True, env=env)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertTrue(p.stdout.strip())
+        self.assertTrue(os.path.isfile(os.path.join(share, "mods/pi/quotio.ts")))
         p = subprocess.run([sys.executable, os.path.join(share, "bin/sync-shared"), "--check"], capture_output=True, text=True, env=env)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 

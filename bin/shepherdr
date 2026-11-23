@@ -639,7 +639,7 @@ def share_items(src):
     for f in walk_files(dist) if os.path.isfile(os.path.join(dist, "index.html")) else []:
         if f != "artifact-viewer.html":   # 3.1's recipe viewer, left in an older build: artifacts are plain pages now
             items.append(("share", f"{SHARE}/web/dist/{f}", os.path.join(dist, f)))
-    for top in ("mods/tasks/bin", "mods/artifacts/bin", "bin", "hooks", "herdr", "templates"):
+    for top in ("mods/tasks/bin", "mods/artifacts/bin", "mods/pi", "bin", "hooks", "herdr", "templates"):
         for f in walk_files(os.path.join(src, top)) if os.path.isdir(os.path.join(src, top)) else []:
             if top != "templates" or f.endswith(".md"):
                 items.append(("share", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
