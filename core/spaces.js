@@ -27,7 +27,7 @@ export function chatPane(k) {
 // machine's own ids, without the "<machine>/" an app id has). null when none runs: one that ended (killed, crashed,
 // exited) is never the agent a message goes to (SHEP-297: a send went to it and failed "That agent isn't running.").
 export function assistantOf(space, ts) {
-  return assistantsOf(space, ts).find((k) => k.state === "live") ?? null;
+  return assistantsOf(space, ts).filter((k) => k.state === "live").reduce((n, k) => !n || (Number(k.created_ms) || 0) > (Number(n.created_ms) || 0) ? k : n, null);
 }
 
 // The terminal a space's chat reads: its live Assistant, else the latest that ended (its chat's history and unread

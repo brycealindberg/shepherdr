@@ -161,6 +161,35 @@ class NoTab(unittest.TestCase):
         self.assertEqual(r.stderr.strip(), "It didn't restart on vmb: t2 has no space, tab or chat to restart into.")
 
 
+class OldEnds(unittest.TestCase):
+    """An agent that never reports a status (Pi, Codex's animated start) made restart.sh wait 90 s for it before
+    the old one ended: the old pane lived on beside the new one, and the web chat stayed on it. The old one ends as
+    soon as the new one is running."""
+
+    def test_old_ends_before_waiting_for_the_new_one(self):
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "bin"))
+        os.makedirs(os.path.join(d, ".config", "herdr-core", "templates"))
+        hc = os.path.join(d, "bin", "hc")
+        with open(hc, "w") as f:
+            f.write(r"""#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$FAKE_DIR/calls"
+case $1 in
+  get) echo '{"address":"t2","cwd":"/tmp","labels":{"herdr.space":"sp1","herdr.tab":"tb1"},"foreground":{"name":"pi"}}' ;;
+  run) echo '{"address":"t9","first_message":{"sent":false}}' ;;
+esac
+""")
+        os.chmod(hc, 0o755)
+        e = {"PATH": f"{d}/bin:/usr/bin:/bin", "HOME": d, "HERDR_APP_HOME": d, "FAKE_DIR": d}
+        r = subprocess.run(["bash", SCRIPT, "t2", json.dumps(["pi"])], env=e, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = [c.split()[0:2] for c in read(os.path.join(d, "calls")).splitlines()]
+        self.assertIn(["kill", "t2"], calls)
+        self.assertIn(["wait", "t9"], calls)
+        self.assertLess(calls.index(["kill", "t2"]), calls.index(["wait", "t9"]))
+        self.assertIn(["send", "t9"], calls)
+
+
 class Bash32(unittest.TestCase):
     """macOS's /bin/bash is 3.2, without bash 4's mapfile and readarray (GitHub #736): restart.sh still restarts."""
 

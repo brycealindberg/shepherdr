@@ -157,6 +157,9 @@ else
   out=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$key" "$one")
   rm -f "$file"
   new=$(jq -r '.address // empty' <<<"$out")
+  # The old one ends now, not after the wait below: an agent that never reports a status (Pi) held it up to 90 s
+  # with both panes live, and the web chat on the old one.
+  if [ -n "$new" ]; then hc kill "$old" >/dev/null 2>&1; hc rm "$old" >/dev/null 2>&1; fi
   # Some agents (Codex's animated start) never settle for hc: send once it reports a status.
   if [ -n "$new" ] && [ "$(jq -r '.first_message.sent' <<<"$out")" = false ]; then
     hc wait "$new" --timeout 90 >/dev/null 2>&1

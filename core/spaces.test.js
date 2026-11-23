@@ -92,6 +92,14 @@ test("an ended assistant stays visible until a new one starts", () => {
   expect(lastAssistantOf(space, [newer, { ...old, created_ms: 100 }])).toEqual(newer);
 });
 
+test("two live Assistants (a restart's old one not yet gone): the chat follows the newer", () => {
+  const space = { id: "box/sp1", machine: "box" };
+  const old = { address: "box/t1", state: "live", created_ms: 100, labels: { "herdr.role": "coordinator", "herdr.coordinator.space": "sp1" } };
+  const next = { ...old, address: "box/t2", created_ms: 200 };
+  expect(assistantOf(space, [old, next])).toEqual(next);
+  expect(assistantOf(space, [next, old])).toEqual(next);
+});
+
 test("a space whose Assistants all finished has none to send to (SHEP-297)", () => {
   const space = { id: "box/sp1", machine: "box" };
   const gone = { address: "box/t1", state: "finished", created_ms: 100, labels: { "herdr.role": "coordinator", "herdr.coordinator.space": "sp1" } };
