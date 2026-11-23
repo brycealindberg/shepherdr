@@ -67,15 +67,15 @@ export class Agents {
 
   /** which of the CLIs are installed on a machine (null: it couldn't be asked, so both are offered) */
   private have(machine: string | null): Promise<Set<string> | null> {
-    return sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex"], machine)
+    return sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex", "pi"], machine)
       .then((r: any) => new Set(String(r?.stdout ?? "").split("\n").filter(Boolean)), () => null);
   }
 
   /** What the CLIs on a machine offer a new Assistant (core/settings.js choicesFrom: menus, permission defaults and
    *  the first installed CLI's own defaults), as the window's chat reads it before its first message (loadChoice). */
   private async readOffer(machine: string | null) {
-    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.have(machine)]);
-    const value = (SC as any).choicesFrom({ claude, codex }, { claude: !have || have.has("claude"), codex: !have || have.has("codex") });
+    const [claude, codex, pi, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("pi", machine), this.have(machine)]);
+    const value = (SC as any).choicesFrom({ claude, codex, pi }, { claude: !have || have.has("claude"), codex: !have || have.has("codex"), pi: !!have && have.has("pi") });
     const k = machine ?? "", was = this.offers.get(k)?.value;
     this.offers.set(k, { at: Date.now(), value });
     if (JSON.stringify(was ?? null) !== JSON.stringify(value)) this.onOffer?.();
@@ -121,16 +121,16 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
-    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.have(machine)]);
-    const dflts: any = { claude, codex };
+    const [claude, codex, pi, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("pi", machine), this.have(machine)]);
+    const dflts: any = { claude, codex, pi };
     let meta = reader?.conv?.meta ?? {};
     // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflts[kind]);
     const row = rowFor(kind, c);
-    const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === kind || !have || have.has(k)).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
+    const menus = Object.fromEntries(["claude", "codex", "pi"].filter((k) => k === kind || (k === "pi" ? have?.has(k) : !have || have.has(k))).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
     return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: fastOf(c.fast), perm: c.perm ?? null }, menus,
-      permDefault: { claude: claude?.mode ?? "manual", codex: "auto" }, picks: this.picks(), offline: machine && !(await this.reachable(machine)) ? machine : null };
+      permDefault: { claude: claude?.mode ?? "manual", codex: "auto", pi: null }, picks: this.picks(), offline: machine && !(await this.reachable(machine)) ? machine : null };
   }
 
   /** whether another machine answers now (hc machine ls: connected) */
@@ -141,14 +141,14 @@ export class Agents {
 
   /** Each CLI's own settings here (Settings › Agents' model menu: core/settings.js choicesFrom). */
   async ownDefaults() {
-    const [claude, codex] = await Promise.all([this.defaults("claude", null), this.defaults("codex", null)]);
-    return { claude, codex };
+    const [claude, codex, pi] = await Promise.all([this.defaults("claude", null), this.defaults("codex", null), this.defaults("pi", null)]);
+    return { claude, codex, pi };
   }
 
   /** What an unset role runs, in the window's words ("Opus 5.5 · 1M · High"): each CLI's own defaults here. */
   async defaultLines(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
-    for (const k of ["claude", "codex"]) {
+    for (const k of ["claude", "codex", "pi"]) {
       const d: any = await this.defaults(k, null).catch(() => null);
       if (d) out[k] = line({ agent: k, model: d.model, effort: d.effort ?? d.per?.[String(d.model ?? "").replace(/\[1m\]$/, "")] ?? null, fast: d.fast }).split(" · ").slice(1).join(" · ");
     }
@@ -157,13 +157,13 @@ export class Agents {
 
   /** What each CLI offers on a machine (null: here), as the restart sheet lists them. */
   async choices(machine: string | null) {
-    const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);
-    const dflt: any = { claude, codex };
-    return ["claude", "codex"].map((k) => {
+    const [claude, codex, pi] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("pi", machine)]);
+    const dflt: any = { claude, codex, pi };
+    return ["claude", "codex", "pi"].map((k) => {
       const m = menuFor(k, dflt[k], null);
       // its permission modes, and the one a new agent gets unless picked (the CLI's own: Claude Code's settings mode)
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}), ...(x.fast ? { fast: true } : {}), ...(x.ultrafast ? { ultrafast: true } : {}) })),
-        speeds: speedsOf(m.models), perms: m.perms ?? [], permDefault: k === "claude" ? dflt.claude?.mode ?? "manual" : "auto" };
+        speeds: speedsOf(m.models), perms: m.perms ?? [], permDefault: k === "claude" ? dflt.claude?.mode ?? "manual" : k === "pi" ? null : "auto" };
     });
   }
 
@@ -173,10 +173,10 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? "claude";
-    const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);
-    const dflt: any = { claude, codex };
+    const [claude, codex, pi] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("pi", machine)]);
+    const dflt: any = { claude, codex, pi };
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], reader?.conv?.meta ?? {}, dflt[kind]);
-    const clis = ["claude", "codex"].map((k) => {
+    const clis = ["claude", "codex", "pi"].map((k) => {
       const m = menuFor(k, dflt[k], k === kind ? c.model : null);
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}), ...(x.fast ? { fast: true } : {}), ...(x.ultrafast ? { ultrafast: true } : {}) })),
         speeds: speedsOf(m.models) };
@@ -270,9 +270,9 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     let rec: any = null;
     try { rec = JSON.parse(t.labels?.["herdr.resume"] || "null"); } catch {}
-    const known = (k: unknown) => (k === "claude" || k === "codex" ? k : null);
+    const known = (k: unknown) => (k === "claude" || k === "codex" || k === "pi" ? k : null);
     const argv: string[] = Array.isArray(rec?.argv) && rec.argv.length ? rec.argv : t.argv ?? [];
-    const named = (t.argv ?? []).join(" ").match(/(?:^|[\s/])(claude|codex)(?=\s|$)/)?.[1];
+    const named = (t.argv ?? []).join(" ").match(/(?:^|[\s/])(claude|codex|pi)(?=\s|$)/)?.[1];
     const kind = kindOf(t) ?? known(reader?.kind) ?? known(rec?.kind) ?? known(named) ?? "claude";
     const path = reader?.kind === kind && reader?.path ? reader.path : known(rec?.kind) === kind && typeof rec?.log === "string" && rec.log.startsWith("/") ? rec.log : null;
     const machine = addr.includes("/") ? addr.split("/")[0] : null;

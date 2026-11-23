@@ -21,7 +21,7 @@ import { codexChoice } from "../core/asks.js";
 const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
+const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", pi: "Pi" };
 import * as MNc from "../core/menus.js";
 const { machineLabel } = MNc as any;
 import { HOME, appHome } from "./paths.ts";
@@ -247,7 +247,7 @@ export class Compat {
     const s = this.spaceList.find((x) => placeKey(x.id) === key);
     if (!s || s.assistant || !(this.agents as any)?.fresh) return null;
     const f = (this.agents as any).fresh(s.machine ?? null, this.assistantPick?.(s.id) ?? null);
-    const kind = f.sel.agent === "codex" ? "codex" : "claude";
+    const kind = f.sel.agent === "codex" || f.sel.agent === "pi" ? f.sel.agent : "claude";
     return { key, fresh: true, messages: [], cli: kind, working: false,
       agent: { kind, words: f.words, speed: f.sel.fast === "ultrafast" ? "ultrafast" : f.sel.fast ? "fast" : "normal", ...(f.sel.perm ? { perm: f.sel.perm } : {}), planned: { ...(f.sel.model ? { model: f.sel.model } : {}), ...(f.label ? { modelLabel: f.label } : {}), ...(f.effort ? { effort: f.effort } : {}) } } } as Chat;
   }
@@ -265,14 +265,14 @@ export class Compat {
         const t: any = (this as any).terminalsOf?.(s.assistant);
         let kind: string | null = kindOfTerm(t);
         if (!kind) { try { kind = JSON.parse(t?.labels?.["herdr.resume"] || "{}").kind ?? null; } catch {} }
-        if (!t || (kind !== "claude" && kind !== "codex")) return null;
+        if (!t || (kind !== "claude" && kind !== "codex" && kind !== "pi")) return null;
         const { flags: _, ...a } = this.agentNow(kind, t, this.reader?.(s.assistant)?.conv?.meta, s.machine ?? null);
         return a;
       }
       return this.freshChat(key)?.agent ?? null;
     } catch { return null; }
   }
-  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; revive?(addr: string, reader: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown }> } | null = null;
+  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; revive?(addr: string, reader: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown; pi: unknown }> } | null = null;
 
   /** Agents' secret asks (service/secrets.ts), set by main. */
   secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;
@@ -334,7 +334,7 @@ export class Compat {
     if (!key.startsWith("p:")) return null;
     const space = key.slice(2).replace(":", "/");
     const h = this.shared?.value("chat.history")?.[space];
-    if (!h || typeof h.path !== "string" || !h.path.startsWith("/") || !["claude", "codex"].includes(h.kind)) return null;
+    if (!h || typeof h.path !== "string" || !h.path.startsWith("/") || !["claude", "codex", "pi"].includes(h.kind)) return null;
     const machine = space.includes("/") ? space.split("/")[0] : "";
     return `log:${machine}|${h.kind}|${h.path}`;
   }
@@ -743,6 +743,6 @@ export class Compat {
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
     const failed = failedOf(addr);
-    return { key, messages, ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
+    return { key, messages, ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" || reader.kind === "pi" ? reader.kind : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }

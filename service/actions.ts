@@ -443,7 +443,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     }
     return { ok: true };
   }
-  if (b?.type === "model-pin" && compat.agents && ["claude", "codex"].includes(b.agent) && typeof b.model === "string" && /^[\w.\[\]-]{1,60}$/.test(b.model)) {
+  if (b?.type === "model-pin" && compat.agents && ["claude", "codex", "pi"].includes(b.agent) && typeof b.model === "string" && /^[\w.\[\]-]{1,60}$/.test(b.model)) {
     // the model menu's star: pinned to the top of its agent's list (core/agents.js PICKS_FILE)
     return { ok: true, picks: (compat.agents as any).pin(b.agent, b.model) };
   }
@@ -455,7 +455,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       // a space's Assistant that hasn't started (SHEP-263): the menu shows what its first message starts it on, and a
       // pick only changes that choice (nothing runs yet), kept in the shared document (CHOICE_KEY)
       if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).freshMenu(fresh.machine, compat.assistantPick?.(fresh.id) ?? null) };
-      if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
+      if (!["claude", "codex", "pi"].includes(b.kind)) throw new Error("Pick Claude Code, Codex or Pi.");
       const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : null);
       if (!compat.shared) throw new Error("The choice couldn't be kept.");
       await compat.shared.set(CHOICE_KEY, withChoice(compat.shared.value(CHOICE_KEY), fresh.id, { agent: b.kind, model: opt(b.model), effort: opt(b.effort), fast: speedOf(opt(b.speed)), perm: opt(b.perm) }));
@@ -464,7 +464,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const a = chat(b.chat), reader = compat.reader?.(a);
     if (b.type === "restart-info") return compat.agents.info(a, reader);
     if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).menu(a, reader) };
-    if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
+    if (!["claude", "codex", "pi"].includes(b.kind)) throw new Error("Pick Claude Code, Codex or Pi.");
     const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
     const pick = { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) };
     // the model menu (live): in place when only the model, level or Fast changes; the restart sheet restarts
