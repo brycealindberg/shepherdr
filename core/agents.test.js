@@ -306,3 +306,49 @@ test("a Quotio agent shows its row, and a restart back to Opus leaves the proxy"
   expect(back.join(" ")).not.toContain("8317");
   expect(back).toContain("opus");
 });
+
+const agOut = `model\tgpt-6\nquotio\t{"data":[{"id":"gemini-4-hydrogen-xhigh","owned_by":"antigravity"},{"id":"gemini-3.1-flash-image","owned_by":"antigravity"}]}\n`;
+const qCodex = (old) => argvFor({ agent: "codex", model: "quotio:gemini-4-hydrogen-xhigh", fast: true }, old ?? { agent: "codex", argv: ["codex"] }).argv;
+const cfg = (argv) => argv.flatMap((a, i) => (argv[i - 1] === "-c" ? [a] : []));
+
+test("Quotio's Antigravity models show as Codex rows, image models not", () => {
+  const ids = menuFor("codex", parseDefaults("codex", agOut)).models.map((m) => m.id);
+  expect(ids).toContain("quotio:gemini-4-hydrogen-xhigh");
+  expect(ids).not.toContain("quotio:gemini-3.1-flash-image");
+  expect(menuFor("claude", parseDefaults("claude", agOut)).models.some((m) => m.id.startsWith("quotio:"))).toBe(false);
+});
+
+test("a Quotio Codex pick starts Codex on the proxy with a plain prompt, its key never in argv", () => {
+  const argv = qCodex();
+  expect(argv[0]).toBe("codex");
+  expect(argv[argv.indexOf("-m") + 1]).toBe("gemini-4-hydrogen-xhigh");
+  const c = cfg(argv);
+  expect(c).toContain("model_provider=quotio");
+  expect(c.find((x) => x.startsWith("model_providers.quotio="))).toContain("cliproxyapi.conf");
+  expect(c.some((x) => /^instructions="[^"]+"$/.test(x))).toBe(true);
+  expect(c).toContain("project_doc_max_bytes=0");
+  expect(c.some((x) => x.startsWith("service_tier="))).toBe(false);
+  expect(argv.join(" ")).toMatch(/--disable hooks/);
+});
+
+test("a Quotio Codex agent shows its row; a restart to another model leaves the proxy, and back adds it once", () => {
+  const argv = qCodex();
+  const c = current("codex", argv, {}, {});
+  expect(rowFor("codex", c)).toBe("quotio:gemini-4-hydrogen-xhigh");
+  expect(line(c)).toContain("Quotio");
+  const back = argvFor({ agent: "codex", model: "gpt-6" }, { agent: "codex", argv, session: "S1" }).argv;
+  expect(back.join(" ")).not.toContain("quotio");
+  expect(back.join(" ")).not.toContain("--disable hooks");
+  const again = qCodex({ agent: "codex", argv });
+  expect(cfg(again).filter((x) => x === "model_provider=quotio").length).toBe(1);
+  expect(again.filter((x) => x === "hooks").length).toBe(1);
+});
+
+test("a Quotio Codex chat resumes and forks on the proxy", () => {
+  const argv = qCodex();
+  for (const out of [resumeArgv("codex", argv, "abc"), forkArgv("codex", argv, "abc")]) {
+    expect(cfg(out)).toContain("model_provider=quotio");
+    expect(cfg(out).filter((x) => x === "model_provider=quotio").length).toBe(1);
+    expect(out.at(-1)).toBe("abc");
+  }
+});

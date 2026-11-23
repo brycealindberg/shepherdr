@@ -23,6 +23,12 @@ const quotioWindow = (m) => QUOTIO_WINDOWS.find(([p]) => m.startsWith(p)) ?? [m,
 const quotioSettings = (m) => ({ fastMode: false, apiKeyHelper: QUOTIO_KEY, env: { ANTHROPIC_BASE_URL: QUOTIO_URL,
   CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(quotioWindow(m)[2]),
   ANTHROPIC_DEFAULT_OPUS_MODEL: m, ANTHROPIC_DEFAULT_SONNET_MODEL: m, ANTHROPIC_DEFAULT_HAIKU_MODEL: m, CLAUDE_CODE_SUBAGENT_MODEL: m } });
+// WARNING: Antigravity answers a coding agent's own system prompt with a fake 429, so Codex on Quotio runs on a plain one, without AGENTS.md, skills, hooks or plugins.
+const QUOTIO_PROMPT = "You are a helpful assistant. Help users inspect files, run commands, and modify code.";
+const QUOTIO_CODEX_KEYS = /^(model_provider|model_providers\.quotio|instructions|project_doc_max_bytes|skills\.include_instructions)=/;
+const quotioCodex = (m) => ["-m", m, "-c", "model_provider=quotio",
+  "-c", `model_providers.quotio={name="quotio",base_url="${QUOTIO_URL}/v1",wire_api="responses",auth={command="sh",args=["-c",${JSON.stringify(QUOTIO_KEY)}]}}`,
+  "-c", `instructions="${QUOTIO_PROMPT}"`, "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", "--disable", "hooks", "--disable", "plugins"];
 // Permission modes as each CLI has them (Claude: --permission-mode, or
 // --dangerously-skip-permissions for full access; Codex: its sandbox and approvals).
 const PERMS = {
@@ -78,7 +84,6 @@ export const DEFAULTS = `
 if [ "$1" = claude ]; then
   f="$HOME/.claude/settings.json"
   command -v jq >/dev/null && [ -f "$f" ] && jq -r '"model\\t\\(.model // "")", "effort\\t\\(.effortLevel // "")", "fast\\t\\(if .fastMode == true then "on" else "" end)", "per\\t\\(.modelSettings // {} | with_entries(.value |= (.effortLevel // null)) | tojson)", "mode\\t\\(.permissions.defaultMode // "")"' "$f" 2>/dev/null
-  k=$(${QUOTIO_KEY} 2>/dev/null) && [ -n "$k" ] && { printf 'quotio\\t'; curl -s -m 2 -H "Authorization: Bearer $k" ${QUOTIO_URL}/v1/models | tr -d '\\n'; echo; }
 else
   f="$HOME/.codex/config.toml"
   for k in model model_reasoning_effort service_tier sandbox_mode approval_policy; do
@@ -87,6 +92,7 @@ else
   c="$HOME/.codex/models_cache.json"
   [ -f "$c" ] && { printf 'models\\t'; tr -d '\\n' < "$c"; echo; }
 fi
+k=$(${QUOTIO_KEY} 2>/dev/null) && [ -n "$k" ] && { printf 'quotio\\t'; curl -s -m 2 -H "Authorization: Bearer $k" ${QUOTIO_URL}/v1/models | tr -d '\\n'; echo; }
 true`;
 
 function parsePer(text) {
@@ -113,12 +119,12 @@ export function parseDefaults(kind, stdout) {
     } catch {}
   }
   let quotio = [];
-  // WARNING: Antigravity answers Claude Code's own system prompt with a 429 "Resource has been exhausted", so its models can't run here.
-  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).filter((m) => m.owned_by !== "antigravity").map((m) => m.id).filter((id) => id && !/image/.test(id)); } catch {}
+  // WARNING: Antigravity answers Claude Code's own system prompt with a 429 "Resource has been exhausted", so its models run on Codex only.
+  try { quotio = (JSON.parse(out.quotio || "{}").data ?? []).filter((m) => kind !== "claude" || m.owned_by !== "antigravity").map((m) => m.id).filter((id) => id && !/image/.test(id)); } catch {}
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null, quotio }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
-      sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models };
+      sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models, quotio };
 }
 
 // What the agent runs on now: { agent, model, effort, fast, used, window, alias }.
@@ -147,7 +153,8 @@ export function current(kind, argv, meta, dflt) {
   const sandbox = flag(argv, "-s", "--sandbox") ?? o.sandbox_mode ?? dflt.sandbox;
   const perm = argv.includes("--dangerously-bypass-approvals-and-sandbox") || sandbox === "danger-full-access" ? "full"
     : sandbox === "read-only" ? "read-only" : "auto";
-  return { agent: "codex", model, label: dflt.models?.find((m) => m.id === model)?.label ?? null, perm,
+  const proxied = o.model_provider === "quotio" && model;
+  return { agent: "codex", model, ...(proxied ? { alias: `quotio:${model}` } : {}), label: proxied ? `${model} · Quotio` : dflt.models?.find((m) => m.id === model)?.label ?? null, perm,
     effort: meta.effort ?? o.model_reasoning_effort ?? dflt.effort,
     fast: meta.speed ? speedOf(meta.speed) : tier ? speedOf(tier) : dflt.fast === "ultrafast" ? "ultrafast" : Boolean(dflt.fast), used: meta.used ?? null, window: meta.window ?? null };
 }
@@ -221,6 +228,7 @@ export function menuFor(agent, dflt, current = null) {
   }
   const all = (dflt?.models ?? []).map((m) => ({ id: m.id, name: m.label, efforts: m.efforts?.length ? m.efforts : ["low", "medium", "high", "xhigh"],
     defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast, ...(m.ultrafast ? { ultrafast: true } : {}) }));
+  for (const id of dflt?.quotio ?? []) all.push({ id: `quotio:${id}`, name: `${id} · Quotio`, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false });
   if (current && !all.some((m) => m.id === current)) all.unshift({ id: current, name: current, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: dflt?.effort ?? null, fast: false });
   return { name: NAMES.codex, perms: PERMS.codex, models: all };
 }
@@ -310,8 +318,8 @@ export function modelSections(menus, agent, picks, q) {
 
 // The picker row that is what runs now (`c` from current()), or the model as it is.
 export function rowFor(agent, c) {
-  if (agent !== "claude") return c?.model ?? null;
   if (c?.alias?.startsWith("quotio:")) return c.alias;
+  if (agent !== "claude") return c?.model ?? null;
   const has = (m, x) => (m.match ?? [m.id]).includes(x);
   // What runs (the log's model) wins; the alias it was started with only tells which row of
   // that model (Opus or Opus 1M), since the log names both alike.
@@ -342,6 +350,7 @@ function agentAt(argv) {
 function kept(kind, argv) {
   const out = [];
   const rest = argv.slice(Math.max(agentAt(argv), 0) + 1);
+  const quotio = kind === "codex" && overrides(argv).model_provider === "quotio";
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (kind === "claude") {
@@ -354,7 +363,8 @@ function kept(kind, argv) {
       if (i === 0 && (a === "resume" || a === "fork")) { if (rest[1] && !rest[1].startsWith("-")) i++; continue; }
       if (a === "--no-daemon" || a === "--dangerously-bypass-approvals-and-sandbox" || a === "--full-auto") continue;
       if (["-m", "--model", "-s", "--sandbox", "-a", "--ask-for-approval"].includes(a)) { i++; continue; }
-      if ((a === "-c" || a === "--config") && /^(model|model_reasoning_effort|service_tier)=/.test(rest[i + 1] ?? "")) { i++; continue; }
+      if ((a === "-c" || a === "--config") && (/^(model|model_reasoning_effort|service_tier)=/.test(rest[i + 1] ?? "") || QUOTIO_CODEX_KEYS.test(rest[i + 1] ?? ""))) { i++; continue; }
+      if (quotio && a === "--disable" && /^(hooks|plugins)$/.test(rest[i + 1] ?? "")) { i++; continue; }
       if (CODEX_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
       if (a.startsWith("-")) out.push(a);
     }
@@ -434,10 +444,12 @@ export function argvFor(pick, old) {
   }
   // Codex runs its commands outside hc without --no-daemon (as herdr-task and restart.sh add).
   const a = [...flags, "--no-daemon"];
-  if (pick.model) a.push("-m", pick.model);
+  const q = /^quotio:(.+)$/.exec(pick.model ?? "")?.[1];
+  if (q) a.push(...quotioCodex(q));
+  else if (pick.model) a.push("-m", pick.model);
   if (pick.effort) a.push("-c", `model_reasoning_effort="${pick.effort}"`);
   // always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
-  a.push("-c", `service_tier="${codexTier(pick.fast)}"`);
+  if (!q) a.push("-c", `service_tier="${codexTier(pick.fast)}"`);
   if (pick.perm === "full") a.push("--dangerously-bypass-approvals-and-sandbox");
   else if (pick.perm === "read-only") a.push("-s", "read-only", "-a", "on-request");
   else if (pick.perm) a.push("-s", "workspace-write", "-a", "on-request");
@@ -466,7 +478,7 @@ export function forkArgv(kind, argv, session) {
     ? ["--model", "--effort", "--settings"].flatMap((f) => { const v = flag(argv, f); return v ? [f, v] : []; })
     : (() => {
       const m = flag(argv, "-m", "--model"), o = overrides(argv);
-      return [...(m ? ["-m", m] : []), "--no-daemon",
+      return [...(m && o.model_provider === "quotio" ? quotioCodex(m) : m ? ["-m", m] : []), "--no-daemon",
         ...["model_reasoning_effort", "service_tier"].flatMap((k) => (o[k] ? ["-c", `${k}="${o[k]}"`] : []))];
     })();
   const flags = [...kept(kind, argv), ...same];
