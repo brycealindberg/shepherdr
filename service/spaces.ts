@@ -95,7 +95,7 @@ export async function execTemplate(hub: Hub, name: string, machine: string | nul
   if (!head || !own) return plain;
   const has = async (prog: string) => (await exec(hub, ["sh", "-c", `${AGENT_PATH} command -v "$1" >/dev/null 2>&1`, "x", prog], machine).catch(() => null))?.code === 0;
   let cmd = own;
-  if (pick?.agent === "claude" || pick?.agent === "codex") {
+  if (pick?.agent === "claude" || pick?.agent === "codex" || pick?.agent === "pi") {
     if (await has(pick.agent)) {
       const mcp = pick.agent === "codex" && /^quotio:/.test(pick.model ?? "") ? parseDefaults("codex", (await sh(hub, DEFAULTS, ["defaults", "codex"], machine).catch(() => null))?.stdout ?? "").mcp : undefined;
       cmd = argvFor({ ...pick, mcp }, { agent: null, argv: [] }).argv.map(shellWord).join(" ");
