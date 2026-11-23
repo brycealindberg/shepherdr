@@ -517,6 +517,26 @@ test("pi lines are not mistaken for another CLI's, and another's are not pi's", 
 });
 
 const piFind = async (pid, home) => (await new Response(Bun.spawn(["env", `HOME=${home}`, "sh", "-c", FIND, "chat", "pi", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout).text()).trim();
+test("FIND: a new pi before its first message has no session yet: not the previous agent's file in its folder (Linux)", async () => {
+  if (!require("node:fs").existsSync("/proc/self/fd")) return;
+  const home = mkdtempSync(join(tmpdir(), "chat-pi-"));
+  const cwd = require("node:fs").realpathSync(mkdtempSync(join(tmpdir(), "chat-pi-cwd-")));
+  const dir = join(home, ".pi/agent/sessions", `--${cwd.slice(1).replace(/[/:]/g, "-")}--`);
+  mkdirSync(dir, { recursive: true });
+  const previous = join(dir, "2026-11-23T05-07-00-000Z_00000000-0000-7000-8000-00000000000a.jsonl");
+  const mine = join(dir, "2026-11-23T22-48-00-000Z_00000000-0000-7000-8000-00000000000b.jsonl");
+  writeFileSync(previous, "{}\n");
+  utimesSync(previous, 1000, 1000);
+  const pi = Bun.spawn(["sh", "-c", "sleep 30", "pi"], { cwd, stdout: "ignore" });
+  const started = String(Math.floor(Date.now() / 1000) - 5);
+  const find = async () => (await new Response(Bun.spawn(["env", `HOME=${home}`, "sh", "-c", FIND, "chat", "pi", String(pi.pid), started], { stdout: "pipe", stderr: "ignore" }).stdout).text()).trim();
+  try {
+    expect(await find()).toBe("");
+    writeFileSync(mine, "{}\n");
+    expect(await find()).toBe(mine);
+  } finally { pi.kill(); }
+});
+
 test("FIND: a pi process's newest session in its folder's directory, or the one its --session names (Linux)", async () => {
   if (!require("node:fs").existsSync("/proc/self/fd")) return;
   const home = mkdtempSync(join(tmpdir(), "chat-pi-"));

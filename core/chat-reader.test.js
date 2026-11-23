@@ -19,8 +19,14 @@ const readerOf = (found) => { const calls = []; return { calls, r: new ChatReade
 test("a pi with its session file is followed from it, found by pi's kind and pid", async () => {
   const { r, calls } = readerOf("/h/.pi/agent/sessions/--w--/a_b.jsonl\n");
   expect(await r.locate(live())).toBe(true);
-  expect(calls).toEqual([["chat", "pi", "42"]]);
+  expect(calls).toEqual([["chat", "pi", "42", "0"]]);
   expect(r).toMatchObject({ kind: "pi", path: "/h/.pi/agent/sessions/--w--/a_b.jsonl" });
+});
+
+test("the terminal's start is told to the search: a log from before it is not this agent's", async () => {
+  const { r, calls } = readerOf("");
+  await r.locate(live({ created_ms: 1_700_000_123_456 }));
+  expect(calls).toEqual([["chat", "pi", "42", "1700000123"]]);
 });
 
 test("a pi with no session file before its first message is an empty chat, not a lost one", async () => {

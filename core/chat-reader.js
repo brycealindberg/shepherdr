@@ -72,7 +72,7 @@ export class ChatReader {
     const pid = t?.foreground?.pid;
     if (!kind || !pid) { const was = this.state; if (was !== "none") { this.reset(); this.state = "none"; } return was !== "none"; }
     if (this.path && this.kind === kind && this.pid === pid) return false;
-    const f = await this.io.sh(FIND, ["chat", kind, String(pid)], this.machine);
+    const f = await this.io.sh(FIND, ["chat", kind, String(pid), String(Math.floor((t?.created_ms ?? 0) / 1000))], this.machine);
     let path = String(f.stdout ?? "").trim().split("\n").pop() ?? "";
     // Not in its session yet (no report, no turn): perhaps on its CLI's own start screen (Codex's "Update available",
     // "Hooks need review", trust this folder), which shows as a card under an empty chat, as the window's chat has it
