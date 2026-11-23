@@ -420,3 +420,10 @@ test("pi is an agent a space can choose and a task can run", () => {
   const t = { state: "live", labels: { "herdr.task": "r#1" }, status: { app: "pi" } };
   expect(liveTaskAgent(t, [t])).toBe(t);
 });
+
+test("a pi fork keeps the Quotio launch, its own flags with their values, and forks the session", () => {
+  const P = "You are a helpful assistant. Help users inspect files, run commands, and modify code.";
+  const mod = "~/.local/share/shepherdr/mods/pi/quotio.ts";
+  const argv = ["pi", "-ne", "-ns", "-nc", "-e", mod, "--name", "w1", "--model", "quotio/gemini-3-flash:high", "--system-prompt", P, "--session", "/s/x.jsonl"];
+  expect(forkArgv("pi", argv, "/s/x.jsonl")).toEqual(["pi", "-ne", "-ns", "-nc", "-e", mod, "--name", "w1", "--model", "quotio/gemini-3-flash:high", "--system-prompt", P, "--fork", "/s/x.jsonl"]);
+});

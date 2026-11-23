@@ -380,7 +380,8 @@ function kept(kind, argv) {
       if (a.startsWith("-")) out.push(a);
     } else if (kind === "pi") {
       if (PI_BARE.has(a)) continue;
-      if (PI_DROP.has(a)) { i++; continue; }
+      if (PI_DROP.has(a) || a === "--fork" || a === "--session-id") { i++; continue; }
+      if (PI_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
       if (a.startsWith("-")) out.push(a);
     } else {
       if (i === 0 && (a === "resume" || a === "fork")) { if (rest[1] && !rest[1].startsWith("-")) i++; continue; }
@@ -509,6 +510,10 @@ export function resumeArgv(kind, argv, session) {
 // A copy of the conversation in a new tab beside this one, through the CLI's own fork.
 export function forkArgv(kind, argv, session) {
   argv = argv ?? [];
+  if (kind === "pi") {
+    const m = flag(argv, "--model");
+    return ["pi", "-ne", "-ns", "-nc", "-e", PI_MOD, ...kept(kind, argv), ...(m ? ["--model", m] : []), "--system-prompt", QUOTIO_PROMPT, "--fork", session];
+  }
   // The same model, effort and speed as the original.
   const same = kind === "claude"
     ? ["--model", "--effort", "--settings"].flatMap((f) => { const v = flag(argv, f); return v ? [f, v] : []; })
