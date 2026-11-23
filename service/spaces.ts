@@ -6,12 +6,12 @@
 import { existsSync } from "node:fs";
 import type { Hub } from "./hub.ts";
 import { HOME } from "./paths.ts";
-import { exec } from "./model.ts";
+import { exec, sh } from "./model.ts";
 import * as NS from "../core/newspace.js";
 import * as SP from "../core/spaces.js";
 import { AGENT_PATH, cleanCommand } from "../core/clean-env.js";
 import { TEMPLATES_SH } from "../core/paths.js";
-import { argvFor, NAMES, CHOICE_KEY, choiceOf, withChoice } from "../core/agents.js";
+import { argvFor, NAMES, CHOICE_KEY, choiceOf, withChoice, DEFAULTS, parseDefaults } from "../core/agents.js";
 import { spawn } from "./spawn.ts";
 
 /** A space's id as the app names it: another machine's is "<machine>/<id>". */
@@ -96,7 +96,10 @@ export async function execTemplate(hub: Hub, name: string, machine: string | nul
   const has = async (prog: string) => (await exec(hub, ["sh", "-c", `${AGENT_PATH} command -v "$1" >/dev/null 2>&1`, "x", prog], machine).catch(() => null))?.code === 0;
   let cmd = own;
   if (pick?.agent === "claude" || pick?.agent === "codex") {
-    if (await has(pick.agent)) cmd = argvFor(pick, { agent: null, argv: [] }).argv.map(shellWord).join(" ");
+    if (await has(pick.agent)) {
+      const mcp = pick.agent === "codex" && /^quotio:/.test(pick.model ?? "") ? parseDefaults("codex", (await sh(hub, DEFAULTS, ["defaults", "codex"], machine).catch(() => null))?.stdout ?? "").mcp : undefined;
+      cmd = argvFor({ ...pick, mcp }, { agent: null, argv: [] }).argv.map(shellWord).join(" ");
+    }
     else if (!(await has(own.split(/\s+/)[0]))) {
       throw new Error(`${(NAMES as Record<string, string>)[pick.agent] ?? pick.agent} isn't installed on ${machine ?? "this computer"}. Install it, or pick another agent for the Assistant in Settings › Agents.`);
     }

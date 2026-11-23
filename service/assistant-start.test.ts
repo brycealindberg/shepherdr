@@ -49,3 +49,15 @@ test("the chosen agent missing there: the template's own; neither there: a plain
   await expect(execTemplate(b.hub, "assistant", null, { agent: "codex", perm: "full" })).rejects.toThrow("Codex isn't installed on this computer");
   expect(b.made()).toEqual([]);
 });
+
+test("a Codex Quotio Assistant turns off the MCP servers in its config.toml", async () => {
+  const { hub, made } = machine(["codex"]);
+  const home = (await hub.call("", { argv: ["sh", "-c", "printf %s \"$HOME\""] })).stdout;
+  const h = Buffer.from(home, "base64").toString();
+  mkdirSync(join(h, ".codex"), { recursive: true });
+  writeFileSync(join(h, ".codex", "config.toml"), "[mcp_servers.alpha]\ncommand = \"a\"\n\n[mcp_servers.beta]\ncommand = \"b\"\n");
+  await execTemplate(hub, "assistant", null, { agent: "codex", model: "quotio:gemini-4-neon-xhigh", effort: null, fast: false, perm: "full" });
+  const cmd = commandOf(made()[0]);
+  expect(cmd).toContain("mcp_servers.alpha.enabled=false");
+  expect(cmd).toContain("mcp_servers.beta.enabled=false");
+});
