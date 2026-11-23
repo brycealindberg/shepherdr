@@ -1302,7 +1302,7 @@ def ensure_agent_browser(r, home):
         say("  agent-browser: would make sure it's here (herdr-browser --install)")
         return
     try:
-        p = subprocess.run(["sh", hb, "--install"], capture_output=True, text=True, env=browser_env(r.root),
+        p = subprocess.run(["sh", hb, "--install"], capture_output=True, text=True, errors="replace", env=browser_env(r.root),
                            stdin=subprocess.DEVNULL, timeout=1200)
         out = (p.stdout.strip() or p.stderr.strip()).splitlines()
         line = out[-1] if out else ""
@@ -1340,7 +1340,7 @@ def ensure_agent_desktop(r, home):
         say("  agent-desktop: would make sure it's here (herdr-desktop --install)")
         return
     try:
-        p = subprocess.run(["sh", hd, "--install"], capture_output=True, text=True, env=browser_env(r.root),
+        p = subprocess.run(["sh", hd, "--install"], capture_output=True, text=True, errors="replace", env=browser_env(r.root),
                            stdin=subprocess.DEVNULL, timeout=900)
         ok = p.returncode == 0
         out = [x.replace("herdr-desktop: ", "", 1) for x in (p.stdout + "\n" + p.stderr).splitlines()
