@@ -17,7 +17,7 @@ import * as LS from "../core/live-switch.js";
 import * as SC from "../core/settings.js";
 import { spawn } from "./spawn.ts";
 
-const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
+const { DEFAULTS, parseDefaults, argvOf, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
 /** a chat's speed as kept: false, true (Fast) or "ultrafast" */
 const fastOf = (f: unknown) => (f === "ultrafast" ? "ultrafast" : !!f);
 /** the speeds a CLI's models offer: normal, then fast and ultrafast where one has them (SHEP-258) */
@@ -126,7 +126,7 @@ export class Agents {
     let meta = reader?.conv?.meta ?? {};
     // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflts[kind]);
+    const c = current(kind, argvOf(t), meta, dflts[kind]);
     const row = rowFor(kind, c);
     const menus = Object.fromEntries(["claude", "codex", "pi"].filter((k) => k === kind || (k === "pi" ? have?.has(k) : !have || have.has(k))).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
     return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: fastOf(c.fast), perm: c.perm ?? null }, menus,
@@ -175,7 +175,7 @@ export class Agents {
     const kind = kindOf(t) ?? "claude";
     const [claude, codex, pi] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("pi", machine)]);
     const dflt: any = { claude, codex, pi };
-    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], reader?.conv?.meta ?? {}, dflt[kind]);
+    const c = current(kind, argvOf(t), reader?.conv?.meta ?? {}, dflt[kind]);
     const clis = ["claude", "codex", "pi"].map((k) => {
       const m = menuFor(k, dflt[k], k === kind ? c.model : null);
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}), ...(x.fast ? { fast: true } : {}), ...(x.ultrafast ? { ultrafast: true } : {}) })),
@@ -195,7 +195,7 @@ export class Agents {
     const dflt = await this.defaults(kind, machine);
     let meta = reader?.conv?.meta ?? {};
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflt);
+    const c = current(kind, argvOf(t), meta, dflt);
     const from = { agent: kind, model: rowFor(kind, c) ?? "", effort: c.effort ?? "", fast: fastOf(c.fast), perm: c.perm ?? "" };
     const to = { agent: pick.kind, model: pick.model ?? "", effort: pick.effort ?? "", fast: speedOf(pick.speed), perm: pick.perm ?? "" };
     if (!LS.liveOK(from, to)) return { terminal: await this.restart(addr, reader, pick) };

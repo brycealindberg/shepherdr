@@ -57,6 +57,13 @@ test("the picker's lists come from each agent's own menus; an agent Shepherdr ca
   expect(c.agents[1]).toMatchObject({ id: "pi", installed: false, why: "No chat yet" });
 });
 
+test("the picker lists a model the person pinned first, the rest in their order", () => {
+  const models = ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() }));
+  const c = catalogOf("mini", [{ kind: "pi", name: "Pi", models }], { pi: true }, [], { pinned: ["pi:c", "claude:a"], recent: [] });
+  expect(c.agents[0]!.models.map((m: any) => m.id)).toEqual(["c", "a", "b", "d"]);
+  expect(catalogOf("mini", [{ kind: "pi", name: "Pi", models }], { pi: true }).agents[0]!.models.map((m: any) => m.id)).toEqual(["a", "b", "c", "d"]);
+});
+
 test("two home spaces on this computer: Everything is always the same one, and neither is listed (SHEP-296)", async () => {
   const { enrich } = await import("./next.ts");
   const { HOME } = await import("./paths.ts");

@@ -184,9 +184,15 @@ const PERM_ABOUT: Record<string, Record<string, string>> = {
 };
 const PERM_LABEL: Record<string, string> = { manual: "Default", bypassPermissions: "Bypass" };
 
+/** The models with the person's pinned ones first, in the order they pinned them. */
+const pinnedFirst = (kind: string, models: any[], picks?: { pinned: string[] }) => {
+  const rank = (m: any) => { const p = picks?.pinned.indexOf(`${kind}:${m.id}`) ?? -1; return p < 0 ? Infinity : p; };
+  return models.map((m, i) => ({ m, i, r: rank(m) })).sort((a, b) => (a.r === b.r ? a.i - b.i : a.r < b.r ? -1 : 1)).map((x) => x.m);
+};
+
 /** A machine's agents and their models, from what each agent's own settings and catalog say there (`choices`: per CLI
  *  { kind, name, models, speeds, perms, permDefault }); `known`: the other agents herdr-core can run there. */
-export function catalogOf(machine: string, choices: any[], installed: Record<string, boolean>, known: { key: string; name: string; installed?: boolean }[] = []): Catalog {
+export function catalogOf(machine: string, choices: any[], installed: Record<string, boolean>, known: { key: string; name: string; installed?: boolean }[] = [], picks?: { pinned: string[] }): Catalog {
   const agents: CatalogAgent[] = choices.map((c) => {
     // a model's own speeds (its service tiers): Speed shows only where a model has more than one
     const speeds = (m: any) => ["regular", ...(m.fast ? ["fast"] : []), ...(m.ultrafast ? ["ultrafast"] : [])];
@@ -194,7 +200,7 @@ export function catalogOf(machine: string, choices: any[], installed: Record<str
     return {
       id: c.kind, name: c.name, installed: installed[c.kind] !== false,
       ...(installed[c.kind] === false ? { why: "Not installed" } : {}),
-      models: (c.models ?? []).map((m: any) => ({ id: m.id, name: m.label ?? m.name ?? m.id, speeds: speeds(m), ...(m.efforts?.length ? { efforts: m.efforts } : {}), ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}) })),
+      models: pinnedFirst(c.kind, c.models ?? [], picks).map((m: any) => ({ id: m.id, name: m.label ?? m.name ?? m.id, speeds: speeds(m), ...(m.efforts?.length ? { efforts: m.efforts } : {}), ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}) })),
       efforts,
       perms: (c.perms ?? []).map((p: any) => ({ id: p.id, label: PERM_LABEL[p.id] ?? p.label, about: PERM_ABOUT[c.kind]?.[p.id] ?? "" })),
       permDefault: c.permDefault,

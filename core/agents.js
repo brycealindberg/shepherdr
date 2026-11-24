@@ -157,7 +157,7 @@ export function current(kind, argv, meta, dflt) {
       fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (proxied ? quotioWindow(proxied)[1] : big ? 1000000 : 200000) };
   }
   if (kind === "pi") {
-    const [, id, thinking] = /^(?:quotio\/)?(.+?)(?::(off|minimal|low|medium|high|xhigh|max))?$/.exec(flag(argv, "--model") ?? "") ?? [];
+    const [, id, thinking] = /^(?:quotio\/)?(.+?)(?::(off|minimal|low|medium|high|xhigh|max))?$/.exec(flag(argv, "--model") ?? /--model (\S+)/.exec(argv.join(" "))?.[1] ?? "") ?? [];
     const model = meta.model ?? id ?? null;
     return { agent: "pi", model, ...(model ? { alias: `quotio:${model}`, label: `${model} · Quotio` } : {}), effort: meta.effort ?? thinking ?? null, fast: false,
       used: meta.used ?? null, window: meta.window ?? (model ? quotioWindow(model)[1] : null) };
@@ -554,7 +554,7 @@ export const FORK_LIVE = {
 // kept (herdr.resume argv: an Assistant started from a template runs under `sh -c "… exec claude --model …"`, so the
 // terminal's own argv names no model once it ended), else the terminal's.
 export function argvOf(t) {
-  if (Array.isArray(t?.foreground?.argv) && t.foreground.argv.length) return t.foreground.argv;
+  if (t?.foreground?.argv?.slice(1).some(Boolean)) return t.foreground.argv;
   try {
     const r = JSON.parse(t?.labels?.["herdr.resume"] || "{}");
     if (Array.isArray(r?.argv) && r.argv.length) return r.argv;

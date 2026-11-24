@@ -38,7 +38,8 @@ for p in "$pid" $(kids "$pid"); do
     s=$(ps -ww -o args= -p "$p" 2>/dev/null | tr ' ' '\n' | sed -n '/^--session$/{n;p;q;}')
     # A new pi writes its file with its first message: until then the folder's newest is the previous agent's.
     since=0; [ -n "$s" ] || since="\${3:-0}"
-    f=$(find "$HOME/.pi/agent/sessions/--$(printf %s "\${w#/}" | tr '/:' '--')--" -maxdepth 1 -name "*$s*.jsonl" -newermt "@$since" 2>/dev/null | xargs -r ls -t 2>/dev/null | head -n 1)
+    d=$(date -d "@$since" '+%F %T' 2>/dev/null || date -r "$since" '+%F %T')
+    f=$(find "$HOME/.pi/agent/sessions/--$(printf %s "\${w#/}" | tr '/:' '--')--" -maxdepth 1 -name "*$s*.jsonl" -newermt "$d" -print0 2>/dev/null | xargs -0 -r ls -t 2>/dev/null | head -n 1)
     [ -n "$f" ] && { echo "$f"; exit 0; }
   else
     if [ -d "/proc/$p/fd" ]; then

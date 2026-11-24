@@ -657,7 +657,7 @@ async function doAction(body: any): Promise<Response> {
     try {
       let check: any = {};
       try { check = JSON.parse(readFileSync(where()["cli-check"], "utf8"))?.machines?.[machine ?? ""] ?? {}; } catch {}
-      return json({ ok: true, catalog: catalogOf(machine ?? me?.host ?? "", (await compat.agents!.choices(machine)) as any[], { claude: check.claude !== "missing", codex: check.codex !== "missing", pi: check.pi ? check.pi !== "missing" : !machine && !!Bun.which("pi") }) });
+      return json({ ok: true, catalog: catalogOf(machine ?? me?.host ?? "", (await compat.agents!.choices(machine)) as any[], { claude: check.claude !== "missing", codex: check.codex !== "missing", pi: check.pi ? check.pi !== "missing" : !machine && !!Bun.which("pi") }, [], compat.agents!.picks()) });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
   // a screen's own actions: Take over, Hand back (or "I'm done"), Skip, a screenshot kept, Open on the desktop instead

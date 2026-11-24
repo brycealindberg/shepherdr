@@ -537,6 +537,25 @@ test("FIND: a new pi before its first message has no session yet: not the previo
   } finally { pi.kill(); }
 });
 
+test("FIND: a new pi's file is found where find has no @epoch (macOS) and the folder's name has a space (Linux)", async () => {
+  if (!require("node:fs").existsSync("/proc/self/fd")) return;
+  const home = mkdtempSync(join(tmpdir(), "chat-pi-"));
+  const bin = mkdtempSync(join(tmpdir(), "chat-pi-bin-"));
+  const real = Bun.which("find");
+  writeFileSync(join(bin, "find"), `#!/bin/sh\nfor a; do case "$a" in @*) echo "find: Can't parse date/time: $a" >&2; exit 1;; esac; done\nexec ${real} "$@"\n`, { mode: 0o755 });
+  const cwd = require("node:fs").realpathSync(mkdtempSync(join(tmpdir(), "chat pi cwd-")));
+  const dir = join(home, ".pi/agent/sessions", `--${cwd.slice(1).replace(/[/:]/g, "-")}--`);
+  mkdirSync(dir, { recursive: true });
+  const mine = join(dir, "2026-11-23T22-48-00-000Z_00000000-0000-7000-8000-00000000000b.jsonl");
+  writeFileSync(mine, "{}\n");
+  const pi = Bun.spawn(["sh", "-c", "sleep 30", "pi"], { cwd, stdout: "ignore" });
+  const started = String(Math.floor(Date.now() / 1000) - 5);
+  try {
+    const out = await new Response(Bun.spawn(["env", `HOME=${home}`, `PATH=${bin}:${process.env.PATH}`, "sh", "-c", FIND, "chat", "pi", String(pi.pid), started], { stdout: "pipe", stderr: "ignore" }).stdout).text();
+    expect(out.trim()).toBe(mine);
+  } finally { pi.kill(); }
+});
+
 test("FIND: a pi process's newest session in its folder's directory, or the one its --session names (Linux)", async () => {
   if (!require("node:fs").existsSync("/proc/self/fd")) return;
   const home = mkdtempSync(join(tmpdir(), "chat-pi-"));

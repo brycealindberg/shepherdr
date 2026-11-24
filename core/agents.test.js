@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as AGall from "./agents.js";
-import { argvFor, contextWords, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
+import { argvOf, argvFor, contextWords, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -440,6 +440,16 @@ test("a running pi shows its quotio row, level and window from its arguments, a 
   expect(current("pi", argv, { model: "gemini-5", effort: "low", used: 500000 }, {})).toMatchObject({ model: "gemini-5", effort: "low", used: 500000 });
   expect(AGall.liveAgent("pi", { foreground: { argv } }, {}, {})).toMatchObject({ kind: "pi", model: "gemini-4-hydrogen-xhigh", effort: "high", words: "gemini-4-hydrogen-xhigh · Quotio · High" });
   expect(extraFlags("pi", [...argv, "--offline"])).toEqual(["--offline"]);
+});
+
+test("a running pi whose process shows only its name (foreground argv blank) still shows the model it was started on, from its sh -c start line", () => {
+  const sh = ["sh", "-c", "for v in $(env); do unset \"$v\"; done; exec pi -ne -ns -nc -e \\~/.local/share/shepherdr/mods/pi/quotio.ts --model quotio/gemini-4-neon-xhigh --system-prompt You\\ are\\ a\\ helper"];
+  const t = { argv: sh, foreground: { name: "node", argv: ["pi", "", "", ""] } };
+  expect(argvOf(t)).toBe(sh);
+  const c = current("pi", argvOf(t), {}, {});
+  expect(c).toMatchObject({ model: "gemini-4-neon-xhigh", effort: null });
+  expect(rowFor("pi", c)).toBe("quotio:gemini-4-neon-xhigh");
+  expect(argvOf({ argv: sh, foreground: { argv: ["pi", "--model", "quotio/x"] } })).toEqual(["pi", "--model", "quotio/x"]);
 });
 
 test("a pi that ended resumes its own session with its own flags, the session from its log's file name", () => {
