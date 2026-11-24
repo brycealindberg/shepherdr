@@ -59,7 +59,7 @@ test("the picker's lists come from each agent's own menus; an agent Shepherdr ca
 
 test("the picker lists a model the person pinned first, the rest in their order", () => {
   const models = ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() }));
-  const c = catalogOf("mini", [{ kind: "pi", name: "Pi", models }], { pi: true }, [], { pinned: ["pi:c", "claude:a"], recent: [] });
+  const c = catalogOf("mini", [{ kind: "pi", name: "Pi", models }], { pi: true }, [], { pinned: ["pi:c", "claude:a"] });
   expect(c.agents[0]!.models.map((m: any) => m.id)).toEqual(["c", "a", "b", "d"]);
   expect(catalogOf("mini", [{ kind: "pi", name: "Pi", models }], { pi: true }).agents[0]!.models.map((m: any) => m.id)).toEqual(["a", "b", "c", "d"]);
 });
